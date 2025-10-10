@@ -1,0 +1,18 @@
+name: fusion_daily
+version: 1.0
+primary_key: [fecha, numero]
+description: "Fusión diaria multinivel (Cruzado+Estructural+Derivado), score por capa y probabilidad calibrada."
+fields:
+  - {name: fecha, type: date, required: true}
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: score_cruzado, type: number, required: true}
+  - {name: score_estructural, type: number, required: true}
+  - {name: score_derivado, type: number, required: true}
+  - {name: score_total, type: number, required: true}
+  - {name: prob, type: number, min: 0, max: 1, required: true}
+  - {name: tipo_convergencia, type: string, enum: [C+E+D, C+E, C+D, E+D, C, E, D], required: true}
+  - {name: detalles, type: string, required: false, description: "JSON con trazas por capa"}
+constraints:
+  not_null: [[fecha, numero, score_cruzado, score_estructural, score_derivado, score_total, prob, tipo_convergencia]]
+  checks:
+    - "prob >= 0 and prob <= 1"

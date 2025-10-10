@@ -1,0 +1,18 @@
+name: cross_activations
+version: 1.0
+primary_key: [fecha, numero, origen_pos, destino_pos, lag]
+description: "Activaciones cruzadas Origen→Destino por lag y oportunidades reales."
+fields:
+  - {name: fecha, type: date, required: true}
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: origen_pos, type: integer, enum: [1,2,3], required: true}
+  - {name: destino_pos, type: integer, enum: [1,2,3], required: true}
+  - {name: lag, type: integer, min: 1, max: 3650, required: true}
+  - {name: oportunidades, type: integer, min: 0, required: true}
+  - {name: activaciones, type: integer, min: 0, required: true}
+  - {name: peso, type: number, required: true}
+  - {name: evidencia, type: string, required: false}
+constraints:
+  not_null: [[fecha, numero, origen_pos, destino_pos, lag, oportunidades, activaciones, peso]]
+  checks:
+    - "destino_pos in [1,2,3] and origen_pos in [1,2,3]"

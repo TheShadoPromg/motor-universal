@@ -1,0 +1,12 @@
+name: lineage
+version: 1.0
+primary_key: [artifact_id]
+description: "Linaje de artefactos: inputs (hash), código (commit) y responsable."
+fields:
+  - {name: artifact_id, type: string, required: true}
+  - {name: fecha, type: datetime, required: true}
+  - {name: inputs, type: string, required: true, description: "JSON: archivos/parquets con hash"}
+  - {name: code_commit, type: string, required: true}
+  - {name: responsable, type: string, required: true}
+constraints:
+  not_null: [[artifact_id, fecha, inputs, code_commit, responsable]]

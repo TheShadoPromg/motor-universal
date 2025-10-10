@@ -1,0 +1,36 @@
+name: draws
+version: 1.0
+primary_key: [fecha]
+description: "Resultados históricos de la Lotería Real RD. Un registro por fecha."
+fields:
+  - name: fecha
+    type: date
+    required: true
+  - name: pos1
+    type: string
+    format: "NN" # 00–99 (zfill(2))
+    domain: [00..99]
+    required: true
+  - name: pos2
+    type: string
+    format: "NN"
+    domain: [00..99]
+    required: true
+  - name: pos3
+    type: string
+    format: "NN"
+    domain: [00..99]
+    required: true
+  - name: id_sorteo
+    type: string
+    required: false
+  - name: fuente
+    type: string
+    required: false
+constraints:
+  uniqueness:
+    - [fecha]
+  not_null:
+    - [fecha, pos1, pos2, pos3]
+notes:
+  - "Fechas completas; no se aceptan huecos sin justificar en histórico."

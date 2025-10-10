@@ -1,0 +1,15 @@
+name: derived_dynamic
+version: 1.0
+primary_key: [fecha, numero, tipo_relacion, k, lag]
+description: "Relaciones derivadas dinámicas diarias (espejos, (n±k) mod 100, complementos) con activaciones y oportunidades."
+fields:
+  - {name: fecha, type: date, required: true}
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: tipo_relacion, type: string, enum: [espejo,sum_mod,seq,complemento,otros], required: true}
+  - {name: k, type: integer, required: false, description: "Parámetro de la relación; null si no aplica"}
+  - {name: lag, type: integer, min: 1, max: 3650, required: true}
+  - {name: oportunidades, type: integer, min: 0, required: true}
+  - {name: activaciones, type: integer, min: 0, required: true}
+  - {name: consistencia, type: number, min: 0, max: 1, required: true}
+constraints:
+  not_null: [[fecha, numero, tipo_relacion, lag, oportunidades, activaciones, consistencia]]

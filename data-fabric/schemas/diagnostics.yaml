@@ -1,0 +1,15 @@
+name: diagnostics
+version: 1.0
+primary_key: [fecha]
+description: "Diagnóstico diario: métricas de calibración y clase de día."
+fields:
+  - {name: fecha, type: date, required: true}
+  - {name: logloss, type: number, min: 0, required: true}
+  - {name: brier, type: number, min: 0, required: true}
+  - {name: ece, type: number, min: 0, required: true}
+  - {name: DAP, type: number, min: 0, required: true}
+  - {name: ES, type: number, min: 0, max: 1, required: true}
+  - {name: DI, type: number, min: 0, required: true}
+  - {name: clase_dia, type: string, enum: [activo, neutro, adverso], required: true}
+constraints:
+  not_null: [[fecha, logloss, brier, ece, DAP, ES, DI, clase_dia]]

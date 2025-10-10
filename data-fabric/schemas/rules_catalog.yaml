@@ -1,0 +1,13 @@
+name: rules_catalog
+version: 1.0
+primary_key: [rule_id]
+description: "Catálogo de reglas/propiedades con parámetros y estado."
+fields:
+  - {name: rule_id, type: string, required: true}
+  - {name: tipo, type: string, enum: [cruzado, estructural, derivado], required: true}
+  - {name: parametros, type: string, required: true, description: "JSON con origen→destino, lag, k, etc."}
+  - {name: descripcion, type: string, required: false}
+  - {name: fecha_alta, type: date, required: true}
+  - {name: estado, type: string, enum: [activa, pausada, retirada], required: true}
+constraints:
+  not_null: [[rule_id, tipo, parametros, fecha_alta, estado]]

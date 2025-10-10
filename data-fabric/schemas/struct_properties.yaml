@@ -1,0 +1,15 @@
+name: struct_properties
+version: 1.0
+primary_key: [numero]
+description: "Propiedades invariantes/estructurales por número (paridad, decena, espejo, ±k...) con estabilidad longitudinal."
+fields:
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: par, type: boolean, required: true}
+  - {name: alto_bajo, type: string, enum: [alto,bajo], required: true}
+  - {name: decena, type: integer, min: 0, max: 9, required: true}
+  - {name: unidad, type: integer, min: 0, max: 9, required: true}
+  - {name: espejo, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: k_sequences, type: string, required: false, description: "JSON compacto con ±1/±2/±5, etc."}
+  - {name: estabilidad_longitudinal, type: number, min: 0, max: 1, required: true}
+constraints:
+  not_null: [[numero, par, alto_bajo, decena, unidad, espejo, estabilidad_longitudinal]]
