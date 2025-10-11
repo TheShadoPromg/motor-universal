@@ -7,8 +7,7 @@ services:
       POSTGRES_USER: ${PGUSER}
       POSTGRES_PASSWORD: ${PGPASSWORD}
     ports: ["5432:5432"]
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+    volumes: [ "pgdata:/var/lib/postgresql/data" ]
 
   minio:
     image: minio/minio:latest
@@ -16,19 +15,11 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    ports: ["9000:9000", "9001:9001"]
-    volumes:
-      - minio:/data
-
-  prefect:
-    image: prefecthq/prefect:2-latest
-    environment:
-      PREFECT_API_URL: ${PREFECT_API_URL}
-    ports: ["4200:4200"]
-    # agents/flows se configuran luego en ops/runbooks
+    ports: ["9000:9000","9001:9001"]
+    volumes: [ "minio:/data" ]
 
   api:
-    image: ghcr.io/tuorg/motor-api:latest   # se buildeará en CI
+    image: ghcr.io/tuorg/motor-api:latest
     depends_on: [postgres, minio]
     environment:
       DATABASE_URL: postgresql+psycopg://${PGUSER}:${PGPASSWORD}@postgres:5432/motor
@@ -38,7 +29,11 @@ services:
       S3_BUCKET: motor-artifacts
     ports: ["8080:8080"]
 
-  mlflow:  # tracking de experimentos opcional
+  prefect:
+    image: prefecthq/prefect:2-latest
+    ports: ["4200:4200"]
+
+  mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     environment:
       MLFLOW_BACKEND_STORE_URI: postgresql://${PGUSER}:${PGPASSWORD}@postgres:5432/motor
@@ -47,10 +42,6 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
     ports: ["5000:5000"]
-
-  grafana:  # observabilidad opcional
-    image: grafana/grafana:latest
-    ports: ["3000:3000"]
 
 volumes:
   pgdata:

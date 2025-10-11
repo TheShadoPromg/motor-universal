@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv*/
+.env
+# Data / artifacts
+artifacts/
+data-fabric/dvc/
+*.parquet
+*.duckdb
+# Node/Front (si aplicara)
+node_modules/
+# OS/IDE
+.DS_Store
+.vscode/
+.idea/
