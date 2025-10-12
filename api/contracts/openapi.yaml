@@ -7,7 +7,7 @@ servers:
 paths:
   /predict/{fecha}:
     get:
-      summary: Distribución 00–99 del día con desglose por capas
+      summary: Distribución completa 00–99 del día con desglose por capas
       parameters:
         - name: fecha
           in: path
@@ -18,8 +18,8 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PrediccionDia'
+              schema: { $ref: '#/components/schemas/PrediccionDia' }
+
   /diagnostics/{fecha}:
     get:
       summary: Métricas del día (logloss, brier, ece, DAP, ES, DI, clase)
@@ -28,20 +28,33 @@ paths:
       responses:
         "200":
           description: OK
-          content: { application/json: { schema: { $ref: '#/components/schemas/DiagnosticoDia' } } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiagnosticoDia' }
+
   /explain/{fecha}/{numero}:
     get:
-      summary: Trazabilidad completa de un número
+      summary: Trazabilidad completa de un número (reglas/propiedades activas y pesos)
       parameters:
-        - { name: fecha, in: path, required: true, schema: { type: string, format: date } }
+        - { name: fecha,  in: path, required: true, schema: { type: string, format: date } }
         - { name: numero, in: path, required: true, schema: { type: string, pattern: '^[0-9]{2}$' } }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ExplicacionNumero' } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExplicacionNumero' }
+
   /backtest/summary:
     get:
       summary: Resumen de backtesting (walk-forward)
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BacktestSummary' } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BacktestSummary' }
+
 components:
   schemas:
     PrediccionDia:
@@ -53,36 +66,41 @@ components:
           items:
             type: object
             properties:
-              numero: { type: string, pattern: '^[0-9]{2}$' }
-              prob: { type: number }
-              score_cruzado: { type: number }
+              numero:            { type: string, pattern: '^[0-9]{2}$' }
+              prob:              { type: number }
+              score_cruzado:     { type: number }
               score_estructural: { type: number }
-              score_derivado: { type: number }
-              score_total: { type: number }
+              score_derivado:    { type: number }
+              score_total:       { type: number }
               tipo_convergencia: { type: string, enum: [C+E+D, C+E, C+D, E+D, C, E, D, Sin Activación] }
+
     DiagnosticoDia:
       type: object
       properties:
-        fecha: { type: string, format: date }
-        logloss: { type: number }
-        brier: { type: number }
-        ece: { type: number }
-        DAP: { type: number }
-        ES: { type: number }
-        DI: { type: number }
-        clase_dia: { type: string, enum: [activo, neutro, adverso] }
+        fecha:    { type: string, format: date }
+        logloss:  { type: number }
+        brier:    { type: number }
+        ece:      { type: number }
+        DAP:      { type: number }
+        ES:       { type: number }
+        DI:       { type: number }
+        clase_dia:{ type: string, enum: [activo, neutro, adverso] }
+
     ExplicacionNumero:
       type: object
       properties:
-        fecha: { type: string, format: date }
-        numero: { type: string }
-        cruzado: { type: array, items: { type: string } }
-        estructural: { type: array, items: { type: string } }
-        derivado: { type: array, items: { type: string } }
+        fecha:      { type: string, format: date }
+        numero:     { type: string, pattern: '^[0-9]{2}$' }
+        cruzado:    { type: array, items: { type: string } }
+        estructural:{ type: array, items: { type: string } }
+        derivado:   { type: array, items: { type: string } }
+
     BacktestSummary:
       type: object
       properties:
         logloss: { type: number }
-        brier: { type: number }
-        ece: { type: number }
-        lift_por_cuantil: { type: array, items: { type: number } }
+        brier:   { type: number }
+        ece:     { type: number }
+        lift_por_cuantil:
+          type: array
+          items: { type: number }

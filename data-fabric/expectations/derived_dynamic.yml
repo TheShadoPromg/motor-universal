@@ -1,0 +1,23 @@
+name: derived_dynamic_checkpoint
+config_version: 1
+class_name: SimpleCheckpoint
+validations:
+  - batch_request:
+      datasource_name: filesystem
+      data_connector_name: runtime_data_connector
+      data_asset_name: draws
+      runtime_parameters:
+        path: data/raw/draws.csv   # ajusta a parquet si aplica
+      batch_spec_passthrough: {}
+    expectation_suite_name: draws_suite
+
+  - batch_request:
+      datasource_name: filesystem
+      data_connector_name: runtime_data_connector
+      data_asset_name: derived_dynamic
+      runtime_parameters:
+        path: data/outputs/derived_dynamic.parquet
+      batch_spec_passthrough:
+        reader_options:
+          engine: pyarrow
+    expectation_suite_name: derived_dynamic_suite

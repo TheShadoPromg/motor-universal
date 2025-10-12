@@ -8,7 +8,7 @@ fields:
     required: true
   - name: pos1
     type: string
-    format: "NN" # 00–99 (zfill(2))
+    format: "NN"        # 00–99 (zfill(2))
     domain: [00..99]
     required: true
   - name: pos2

@@ -1,0 +1,22 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [ main, develop ]
+jobs:
+  lint-structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check essential files/folders exist
+        run: |
+          test -f api/contracts/openapi.yaml
+          test -f docs/adr/ADR-001-data-layer.md
+          test -f docs/runbooks/runbook-diario.md
+          test -f docs/qa/definition_of_done.md
+          test -d data-fabric/schemas
+          test -f ops/docker/compose.yml
+      - name: Validate YAML syntax
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_file: .yamllint.yaml

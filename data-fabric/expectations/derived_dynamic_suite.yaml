@@ -1,0 +1,36 @@
+expectation_suite_name: derived_dynamic_suite
+expectations:
+  - expect_table_columns_to_match_set:
+      column_set:
+        ["fecha","numero","tipo_relacion","k","lag","oportunidades","activaciones","consistencia"]
+  - expect_column_values_to_not_be_null: { column: fecha }
+  - expect_column_values_to_match_regex: { column: numero, regex: "^\\d{2}$" }
+  - expect_column_values_to_be_in_set:
+      column: tipo_relacion
+      value_set: ["espejo","sum_mod","seq","complemento"]
+  - expect_column_values_to_be_between:
+      column: k
+      min_value: 0
+      mostly: 1.0
+  - expect_column_values_to_be_between:
+      column: lag
+      min_value: 1
+      mostly: 1.0
+  - expect_column_values_to_be_between:
+      column: oportunidades
+      min_value: 0
+      mostly: 1.0
+  - expect_column_values_to_be_between:
+      column: activaciones
+      min_value: 0
+      mostly: 1.0
+  - expect_column_pair_values_A_to_be_less_than_or_equal_to_B:
+      column_A: activaciones
+      column_B: oportunidades
+  - expect_column_values_to_be_between:
+      column: consistencia
+      min_value: 0.0
+      max_value: 1.0
+      mostly: 1.0
+meta:
+  notes: "Verifica dominios, tipos y activaciones ≤ oportunidades."
