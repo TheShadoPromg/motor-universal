@@ -1,0 +1,59 @@
+expectation_suite_name: derived_dynamic_suite
+expectations:
+    - expect_table_columns_to_match_set:
+          column_set:
+              [
+                  "fecha",
+                  "numero",
+                  "tipo_relacion",
+                  "k",
+                  "lag",
+                  "oportunidades",
+                  "activaciones",
+                  "consistencia",
+              ]
+
+    - expect_column_values_to_not_be_null:
+          column: fecha
+
+    - expect_column_values_to_match_regex:
+          column: numero
+          regex: "^[0-9]{2}$"
+
+    - expect_column_values_to_be_in_set:
+          column: tipo_relacion
+          value_set: ["espejo", "sum_mod", "seq", "complemento"]
+
+    # Nota: 'k' puede ser NULL para espejo/complemento; evitamos exigir 'between' aquí.
+    # Si más adelante quieres validar 'k' solo cuando aplique, lo hacemos con una expectativa condicional.
+
+    - expect_column_values_to_be_between:
+          column: lag
+          min_value: 1
+          mostly: 1.0
+
+    - expect_column_values_to_be_between:
+          column: oportunidades
+          min_value: 0
+          mostly: 1.0
+
+    - expect_column_values_to_be_between:
+          column: activaciones
+          min_value: 0
+          mostly: 1.0
+
+    - expect_column_pair_values_a_to_be_greater_than_b:
+          column_A: oportunidades
+          column_B: activaciones
+          or_equal: true
+          # (opcional, maneja filas con nulos)
+          ignore_row_if: either_value_is_missing
+
+    - expect_column_values_to_be_between:
+          column: consistencia
+          min_value: 0.0
+          max_value: 1.0
+          mostly: 1.0
+
+meta:
+    notes: "Verifica dominios, tipos y 'activaciones ≤ oportunidades'."

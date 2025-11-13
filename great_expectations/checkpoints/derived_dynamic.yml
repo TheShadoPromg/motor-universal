@@ -1,0 +1,30 @@
+name: derived_dynamic
+config_version: 1
+class_name: SimpleCheckpoint
+run_name_template: "%Y-%m-%d-%H-%M-derived_dynamic"
+validations:
+  - name: eventos_validation
+    expectation_suite_name: eventos_numericos_suite
+    batch_request:
+      datasource_name: filesystem
+      data_connector_name: runtime_data_connector
+      data_asset_name: eventos_numericos
+      runtime_parameters:
+        path: data/raw/eventos_numericos.csv
+      batch_identifiers:
+        default_identifier_name: "eventos-manual-run"
+
+  - name: derived_dynamic_validation
+    expectation_suite_name: derived_dynamic_suite
+    batch_request:
+      datasource_name: filesystem
+      data_connector_name: runtime_data_connector
+      data_asset_name: derived_dynamic
+      runtime_parameters:
+        path: data/outputs/derived_dynamic.parquet
+      batch_identifiers:
+        default_identifier_name: "dd-manual-run"
+      batch_spec_passthrough:
+        reader_method: read_parquet
+        reader_options:
+          engine: pyarrow

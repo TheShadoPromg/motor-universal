@@ -1,0 +1,13 @@
+name: draws_only
+config_version: 1
+class_name: SimpleCheckpoint
+validations:
+  - expectation_suite_name: draws_suite
+    batch_request:
+      datasource_name: filesystem
+      data_connector_name: runtime_data_connector
+      data_asset_name: draws
+      runtime_parameters:
+        path: data/raw/draws.csv          # cambia a .parquet si es tu caso
+      batch_identifiers:
+        default_identifier_name: "draws-only"
