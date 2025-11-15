@@ -21,7 +21,7 @@ validations:
       data_connector_name: runtime_data_connector
       data_asset_name: derived_dynamic
       runtime_parameters:
-        path: data/outputs/derived_dynamic.parquet
+        path: data/derived/derived_dynamic.parquet
       batch_identifiers:
         default_identifier_name: "dd-manual-run"
       batch_spec_passthrough:

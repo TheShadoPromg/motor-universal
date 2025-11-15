@@ -8,7 +8,10 @@ validations:
         data_asset_name: cross_daily
         runtime_parameters:
             path: data/derived/cross_daily.parquet
+        batch_identifiers:
+            default_identifier_name: "cross-manual-run"
         batch_spec_passthrough:
+            reader_method: read_parquet
             reader_options:
                 engine: pyarrow
     expectation_suite_name: cross_daily_suite

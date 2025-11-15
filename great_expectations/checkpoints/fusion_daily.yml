@@ -8,7 +8,10 @@ validations:
         data_asset_name: fusion_daily
         runtime_parameters:
             path: data/derived/jugadas_fusionadas_3capas.parquet
+        batch_identifiers:
+            default_identifier_name: "fusion-manual-run"
         batch_spec_passthrough:
+            reader_method: read_parquet
             reader_options:
                 engine: pyarrow
     expectation_suite_name: fusion_daily_suite

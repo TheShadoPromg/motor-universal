@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 
 try:
     from prefect.deployments import Deployment
@@ -11,7 +12,8 @@ except ImportError as exc:  # pragma: no cover
         "Instala prefect>=2.0 para registrar el flujo (pip install prefect)."
     ) from exc
 
-from flows.daily_pipeline import daily_pipeline
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from flows.daily_pipeline import daily_pipeline  # noqa: E402
 
 
 def main() -> None:
