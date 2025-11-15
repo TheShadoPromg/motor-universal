@@ -1,0 +1,14 @@
+name: cross_daily
+version: 1.0
+primary_key: [fecha, numero]
+description: "Score cruzado diario basado en transiciones origen→destino y lags configurables."
+fields:
+  - {name: fecha, type: date, required: true}
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: score_cruzado, type: number, min: 0, max: 1, required: true}
+  - {name: oportunidades_total, type: integer, min: 0, required: true}
+  - {name: activaciones_total, type: integer, min: 0, required: true}
+  - {name: combinaciones_activas, type: integer, min: 0, required: true}
+  - {name: detalle_cruzado, type: string, required: true, description: "JSON con lags/origen/destino destacados."}
+constraints:
+  not_null: [[fecha, numero, score_cruzado, oportunidades_total, activaciones_total]]

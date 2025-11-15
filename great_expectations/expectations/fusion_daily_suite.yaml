@@ -1,0 +1,55 @@
+expectation_suite_name: fusion_daily_suite
+expectations:
+  - expect_table_columns_to_match_set:
+        column_set:
+          [
+            "fecha",
+            "numero",
+            "score_cruzado",
+            "score_estructural",
+            "score_derivado",
+            "score_total",
+            "prob",
+            "tipo_convergencia",
+            "detalles",
+          ]
+
+  - expect_column_values_to_not_be_null:
+        column: fecha
+
+  - expect_column_values_to_match_regex:
+        column: numero
+        regex: "^[0-9]{2}$"
+
+  - expect_column_values_to_be_between:
+        column: prob
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
+        column: score_cruzado
+        min_value: 0.0
+        mostly: 1.0
+
+  - expect_column_values_to_be_between:
+        column: score_estructural
+        min_value: 0.0
+        mostly: 1.0
+
+  - expect_column_values_to_be_between:
+        column: score_derivado
+        min_value: 0.0
+        mostly: 1.0
+
+  - expect_column_values_to_not_be_null:
+        column: score_total
+
+  - expect_column_values_to_be_in_set:
+        column: tipo_convergencia
+        value_set: ["C+E+D", "C+E", "C+D", "E+D", "C", "E", "D", "Sin Activación"]
+
+  - expect_column_values_to_not_be_null:
+        column: detalles
+
+meta:
+    notes: "Revisa columnas y dominios del dataset fusion_daily; la suma de prob se valida aguas arriba."

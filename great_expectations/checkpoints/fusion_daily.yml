@@ -1,0 +1,14 @@
+name: fusion_daily
+config_version: 1
+class_name: SimpleCheckpoint
+validations:
+  - batch_request:
+        datasource_name: filesystem
+        data_connector_name: runtime_data_connector
+        data_asset_name: fusion_daily
+        runtime_parameters:
+            path: data/derived/jugadas_fusionadas_3capas.parquet
+        batch_spec_passthrough:
+            reader_options:
+                engine: pyarrow
+    expectation_suite_name: fusion_daily_suite

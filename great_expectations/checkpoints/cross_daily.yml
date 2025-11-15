@@ -1,0 +1,14 @@
+name: cross_daily
+config_version: 1
+class_name: SimpleCheckpoint
+validations:
+  - batch_request:
+        datasource_name: filesystem
+        data_connector_name: runtime_data_connector
+        data_asset_name: cross_daily
+        runtime_parameters:
+            path: data/derived/cross_daily.parquet
+        batch_spec_passthrough:
+            reader_options:
+                engine: pyarrow
+    expectation_suite_name: cross_daily_suite
