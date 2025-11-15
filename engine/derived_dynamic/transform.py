@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import logging
 import unicodedata
+import os
+import shutil
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -11,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from engine._utils.schema import normalize_events_df
+from engine.derived_dynamic.helpers.storage import upload_artifact
 
 LOGGER = logging.getLogger("derived_dynamic")
 
@@ -20,6 +24,8 @@ DATA_DERIVED = REPO_ROOT / "data" / "derived"
 EVENTS_PARQUET = DATA_RAW / "eventos_numericos.parquet"
 EVENTS_CSV = DATA_RAW / "eventos_numericos.csv"
 DERIVED_OUTPUT = DATA_DERIVED / "derived_dynamic.parquet"
+DEFAULT_DERIVED_BUCKET = os.getenv("DERIVED_DYNAMIC_BUCKET", "motor-derived-dynamic")
+DEFAULT_DERIVED_PREFIX = os.getenv("DERIVED_DYNAMIC_PREFIX", "")
 
 DEFAULT_LAGS = [1, 2, 3, 7, 14, 30]
 DEFAULT_K_VALUES = [1, 2, 5, 10, 50]
@@ -497,6 +503,24 @@ def _parse_relations(raw: str, default: Sequence[str]) -> List[str]:
     return cleaned
 
 
+def _resolve_run_date(raw: Optional[str], derived: pd.DataFrame) -> date:
+    if raw:
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError(f"run-date inválida '{raw}' (formato esperado YYYY-MM-DD).") from exc
+    if not derived.empty:
+        return pd.to_datetime(derived["fecha"]).max().date()
+    return datetime.utcnow().date()
+
+
+def _build_object_name(prefix: str, run_date: date, filename: str) -> str:
+    clean_prefix = prefix.strip("/")
+    segments = [seg for seg in [clean_prefix, run_date.strftime("%Y/%m/%d")] if seg]
+    segments.append(filename)
+    return "/".join(segments)
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Construye el dataset derived_dynamic a partir de eventos numéricos.",
@@ -525,6 +549,21 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--mlflow-uri",
         default=None,
         help="URI del servidor MLflow para registrar métricas.",
+    )
+    parser.add_argument(
+        "--run-date",
+        default=None,
+        help="Fecha (YYYY-MM-DD) que etiquetará el snapshot generado.",
+    )
+    parser.add_argument(
+        "--s3-bucket",
+        default=None,
+        help="Bucket S3/MinIO donde subir el parquet resultante.",
+    )
+    parser.add_argument(
+        "--s3-prefix",
+        default=None,
+        help="Prefijo opcional dentro del bucket (se agregará YYYY/MM/DD/archivo).",
     )
     return parser.parse_args(argv)
 
@@ -557,8 +596,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     derived = generate_relations(panel, relations, lags, k_values)
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
+    run_date = _resolve_run_date(args.run_date, derived)
+    run_date_str = run_date.strftime("%Y-%m-%d")
+    dated_path = DATA_DERIVED / f"derived_dynamic_{run_date_str}.parquet"
     derived.to_parquet(DERIVED_OUTPUT, index=False)
-    LOGGER.info("Se escribió el dataset derived_dynamic en %s", DERIVED_OUTPUT)
+    LOGGER.info("Se escribió el dataset derived_dynamic (latest) en %s", DERIVED_OUTPUT)
+    if dated_path != DERIVED_OUTPUT:
+        shutil.copy2(DERIVED_OUTPUT, dated_path)
+        LOGGER.info("Snapshot fechado almacenado en %s", dated_path)
+    bucket = args.s3_bucket or DEFAULT_DERIVED_BUCKET
+    prefix = args.s3_prefix or DEFAULT_DERIVED_PREFIX
+    if bucket:
+        object_name = _build_object_name(prefix, run_date, "derived_dynamic.parquet")
+        upload_artifact(dated_path, bucket, object_name=object_name)
+    else:
+        LOGGER.info("Bucket S3 no configurado; se omite carga del snapshot.")
 
     total_opportunidades = int(derived["oportunidades"].sum()) if not derived.empty else 0
     total_activaciones = int(derived["activaciones"].sum()) if not derived.empty else 0
@@ -582,8 +634,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "k": ",".join(map(str, k_values)),
             "relaciones": ",".join(relations),
             "eventos_path": str(source_path),
-            "derived_path": str(DERIVED_OUTPUT),
+            "derived_path": str(dated_path),
             "input_format": fmt,
+            "run_date": run_date_str,
         },
         metrics={
             "filas": float(len(derived)),
@@ -591,7 +644,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "total_activaciones": float(total_activaciones),
             "ratio_global": float(ratio_global),
         },
-        artifact_path=DERIVED_OUTPUT,
+        artifact_path=dated_path,
     )
 
     if gx_status == "failed":
