@@ -43,6 +43,28 @@ services:
     depends_on:
       - postgres
 
+  worker:
+    build:
+      context: ../..
+      dockerfile: ops/docker/prefect-worker.Dockerfile
+    restart: unless-stopped
+    command: >
+      bash -lc "
+      cd /opt/motor &&
+      prefect worker start --pool \"$PREFECT_WORK_POOL\" --type process
+      "
+    environment:
+      PREFECT_API_URL: ${PREFECT_API_URL}
+      PYTHONIOENCODING: utf-8
+      PREFECT_WORK_POOL: ${PREFECT_WORK_POOL:-default-agent-pool}
+    env_file:
+      - ../../.env
+    depends_on:
+      prefect:
+        condition: service_started
+    volumes:
+      - ../..:/opt/motor
+
   mlflow:
     build:
       context: .

@@ -18,7 +18,13 @@ from flows.daily_pipeline import daily_pipeline  # noqa: E402
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    schedule = CronSchedule(cron="0 12 * * *", timezone=os.getenv("PREFECT_TIMEZONE", "UTC"))
+    schedule = CronSchedule(
+        cron="0 12 * * *",
+        timezone=os.getenv("PREFECT_TIMEZONE", "UTC"),
+    )
+    deployment_path = os.getenv("PREFECT_DEPLOYMENT_PATH") or os.path.relpath(
+        repo_root, start=Path.cwd()
+    )
 
     deployment = Deployment.build_from_flow(
         flow=daily_pipeline,
@@ -27,10 +33,10 @@ def main() -> None:
             "run_date": None,
             "fusion_weights": os.getenv("FUSION_WEIGHTS", "0.4,0.3,0.3"),
         },
-        work_queue_name=os.getenv("PREFECT_WORK_QUEUE", "default"),
+        work_pool_name=os.getenv("PREFECT_WORK_POOL", "default-agent-pool"),
         tags=["motor-universal"],
-        schedule=schedule,
-        path=str(repo_root),
+        schedules=[schedule],
+        path=deployment_path,
     )
     deployment.apply()
 
