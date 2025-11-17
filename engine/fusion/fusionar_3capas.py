@@ -78,7 +78,7 @@ def _load_daily_frame(
     else:
         if not path.exists():
             raise FileNotFoundError(f"No se encontró el dataset {dataset_name}: {path}")
-        df = pd.read_parquet(path)
+    df = pd.read_parquet(path)
     if df.empty:
         raise ValueError(f"El dataset {dataset_name} está vacío ({path}).")
     df = df.copy()
@@ -86,7 +86,17 @@ def _load_daily_frame(
     mask = df["fecha"] == pd.Timestamp(run_date)
     daily = df.loc[mask].copy()
     if daily.empty:
-        raise ValueError(f"{dataset_name} no contiene información para {run_date} (archivo: {path}).")
+        last_ts = df["fecha"].dropna().max()
+        if pd.isna(last_ts):
+            raise ValueError(f"{dataset_name} no contiene información utilizable (archivo: {path}).")
+        LOGGER.warning(
+            "%s no contiene información para %s; se reutiliza %s como base para pronosticar.",
+            dataset_name,
+            run_date,
+            last_ts.date(),
+        )
+        daily = df.loc[df["fecha"] == last_ts].copy()
+        daily["fecha"] = pd.Timestamp(run_date)
 
     daily["numero"] = daily["numero"].astype(str).str.zfill(2)
     columns = ["fecha", "numero", score_column]

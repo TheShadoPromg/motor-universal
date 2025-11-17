@@ -232,10 +232,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOGGER.error("El dataset de eventos está vacío.")
         return 2
     run_date = _parse_run_date(args.run_date, dates)
-    if pd.Timestamp(run_date) not in dates:
-        raise ValueError(f"No existe información para la fecha {run_date} en eventos_numericos.")
+    target_ts = pd.Timestamp(run_date)
+    if target_ts in dates:
+        idx = dates.index(target_ts)
+        base_ts = target_ts
+        forecast = False
+    else:
+        base_ts = dates[-1]
+        idx = len(dates) - 1
+        forecast = True
+        LOGGER.warning(
+            "No existe información para la fecha %s en eventos_numericos; se reutiliza %s como base para pronosticar.",
+            run_date,
+            base_ts.date(),
+        )
 
-    idx = dates.index(pd.Timestamp(run_date))
     trimmed_dates = dates[: idx + 1]
     trimmed_positions = per_date_positions[: idx + 1]
 
@@ -245,7 +256,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     snapshot_path = DATA_DERIVED / f"cross_daily_{run_date}.parquet"
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
-    daily = df[df["fecha"] == run_date.strftime("%Y-%m-%d")].copy()
+    daily = df[df["fecha"] == base_ts.strftime("%Y-%m-%d")].copy()
+    if forecast:
+        daily["fecha"] = run_date.strftime("%Y-%m-%d")
     daily.to_parquet(snapshot_path, index=False)
     daily.to_parquet(DERIVED_LATEST, index=False)
 

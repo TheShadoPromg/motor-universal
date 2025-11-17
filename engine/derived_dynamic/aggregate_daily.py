@@ -154,6 +154,23 @@ def _aggregate(df: pd.DataFrame, detail_top: int) -> pd.DataFrame:
     ].sort_values(["fecha", "numero"]).reset_index(drop=True)
 
 
+def _forecast_from_latest(aggregated: pd.DataFrame, target_date: datetime) -> pd.DataFrame:
+    latest = (
+        aggregated.sort_values("fecha")
+        .groupby("numero", as_index=False, sort=False)
+        .tail(1)
+        .reset_index(drop=True)
+    )
+    last_available = aggregated["fecha"].max()
+    LOGGER.warning(
+        "No se encontrA3 informaciA3n para %s; se reutiliza el A-ltimo snapshot disponible (%s) para pronosticar.",
+        target_date.strftime("%Y-%m-%d"),
+        last_available.strftime("%Y-%m-%d"),
+    )
+    latest["fecha"] = target_date
+    return latest
+
+
 def _build_object_name(prefix: str, target_date: datetime, filename: str) -> str:
     clean = prefix.strip("/")
     parts = [clean] if clean else []
@@ -209,12 +226,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     aggregated = _aggregate(derived, max(args.detail_top, 1))
     target_date = _parse_target_date(args.target_date, aggregated["fecha"])
     mask = aggregated["fecha"] == target_date
-    if not mask.any():
-        LOGGER.error(
-            "No se encontró información para la fecha objetivo %s.", target_date.strftime("%Y-%m-%d")
-        )
-        return 2
-    daily = aggregated.loc[mask].copy()
+    if mask.any():
+        daily = aggregated.loc[mask].copy()
+    else:
+        daily = _forecast_from_latest(aggregated, target_date)
 
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
     date_str = target_date.strftime("%Y-%m-%d")

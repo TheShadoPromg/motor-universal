@@ -36,6 +36,7 @@ services:
     restart: unless-stopped
     environment:
       PREFECT_API_URL: ${PREFECT_API_URL}
+      PREFECT_API_DATABASE_CONNECTION_URL: ${PREFECT_API_DATABASE_CONNECTION_URL}
     command: >
       prefect server start --host 0.0.0.0
     ports:

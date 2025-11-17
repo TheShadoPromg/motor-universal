@@ -133,6 +133,18 @@ def _build_object_name(prefix: str, run_date: date, filename: str) -> str:
     return "/".join(parts)
 
 
+def _shift_detail_payload(payload: str, delta_days: int) -> str:
+    try:
+        data = json.loads(payload)
+    except Exception:
+        return payload
+    if isinstance(data, dict) and delta_days > 0:
+        value = data.get("dias_desde_ultimo")
+        if isinstance(value, int):
+            data["dias_desde_ultimo"] = value + delta_days
+    return json.dumps(data, ensure_ascii=False)
+
+
 def maybe_run_gx(skip: bool, path: Path) -> str:
     if skip:
         LOGGER.info("Validación GE omitida.")
@@ -218,7 +230,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOGGER.error("No hay fechas disponibles en eventos_numericos.")
         return 2
     run_date = _parse_run_date(args.run_date, dates)
-    run_idx = _find_run_index(dates, run_date)
+    target_ts = pd.Timestamp(run_date)
+    if target_ts in dates:
+        run_idx = _find_run_index(dates, run_date)
+        base_ts = target_ts
+        delta_days = 0
+    else:
+        base_ts = dates.max()
+        run_idx = _find_run_index(dates, base_ts.date())
+        delta_days = max((target_ts - base_ts).days, 0)
+        LOGGER.warning(
+            "No existe información estructural para %s; se reutiliza %s como base para pronosticar.",
+            run_date,
+            base_ts.date(),
+        )
 
     LOGGER.info(
         "Calculando struct_daily para %s (ventana=%s días, recency_weight=%.2f)...",
@@ -227,7 +252,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.recency_weight,
     )
     df = _compute_structural_stats(dates, matrix, run_idx, args.window_days, args.recency_weight)
-    df["fecha"] = df["fecha"].dt.strftime("%Y-%m-%d")
+    if delta_days > 0:
+        df["fecha"] = pd.Timestamp(run_date)
+        df["dias_desde_ultimo"] = (df["dias_desde_ultimo"] + delta_days).astype(int)
+        df["detalle_estructural"] = df["detalle_estructural"].apply(
+            lambda payload: _shift_detail_payload(payload, delta_days)
+        )
+    df["fecha"] = pd.to_datetime(df["fecha"]).dt.strftime("%Y-%m-%d")
 
     snapshot_path = DATA_DERIVED / f"struct_daily_{run_date}.parquet"
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)

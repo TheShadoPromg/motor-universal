@@ -11,6 +11,7 @@ Set-Location "$PSScriptRoot"
 
 # Prefect CLI debe apuntar al servidor local
 $env:PREFECT_API_URL = "http://localhost:4200/api"
+$env:PREFECT_WORK_POOL = "default-process-pool"
 Write-Host "Prefect CLI apuntando a $env:PREFECT_API_URL"
 
 # Opcional: recordatorio de credenciales S3/DB ya definidas en .env

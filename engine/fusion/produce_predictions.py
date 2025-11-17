@@ -146,11 +146,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOGGER.error("El dataset de fusión está vacío.")
         return 2
 
-    run_date = _parse_run_date(args.run_date, fusion["fecha"])
-    mask = pd.to_datetime(fusion["fecha"]) == pd.Timestamp(run_date)
+    fusion["fecha"] = pd.to_datetime(fusion["fecha"], errors="coerce")
+    run_date = _parse_run_date(args.run_date, fusion["fecha"].dropna())
+    target_ts = pd.Timestamp(run_date)
+    mask = fusion["fecha"] == target_ts
     daily = fusion.loc[mask].copy()
     if daily.empty:
-        raise ValueError(f"No se encontraron registros para la fecha {run_date} en {fusion_path}.")
+        last_ts = fusion["fecha"].dropna().max()
+        if pd.isna(last_ts):
+            raise ValueError(f"No se encontraron registros para la fecha {run_date} en {fusion_path}.")
+        LOGGER.warning(
+            "No se encontraron registros de fusión para %s; se reutiliza %s como base para pronosticar.",
+            run_date,
+            last_ts.date(),
+        )
+        daily = fusion.loc[fusion["fecha"] == last_ts].copy()
+        daily["fecha"] = target_ts
 
     daily["score_total"] = daily["score_total"].astype(float)
     daily["prob_raw"] = daily["prob"].astype(float)

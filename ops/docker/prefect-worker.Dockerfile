@@ -1,4 +1,4 @@
-FROM prefecthq/prefect:2-latest
+FROM prefecthq/prefect:2-python3.11
 
 WORKDIR /opt/motor
 
