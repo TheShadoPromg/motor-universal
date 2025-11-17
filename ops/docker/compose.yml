@@ -44,6 +44,23 @@ services:
     depends_on:
       - postgres
 
+  db-init:
+    image: postgres:16
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+    command: >
+      bash -lc "
+      until pg_isready -h postgres -p 5432 -U ${PGUSER}; do sleep 1; done &&
+      psql postgresql://${PGUSER}:${PGPASSWORD}@postgres:5432/motor -f /init/001_create_predictions_table.sql
+      "
+    volumes:
+      - ../sql:/init:ro
+
   worker:
     build:
       context: ../..
@@ -65,6 +82,23 @@ services:
         condition: service_started
     volumes:
       - ../..:/opt/motor
+
+  streamlit:
+    build:
+      context: ../..
+      dockerfile: ops/docker/streamlit.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      PREDICTIONS_DB_URL: ${PREDICTIONS_DB_URL}
+    command: >
+      streamlit run apps/streamlit/app.py --server.address 0.0.0.0 --server.port 8501
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
 
   mlflow:
     build:

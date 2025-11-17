@@ -1,6 +1,7 @@
 # engine/_utils/schema.py
 from __future__ import annotations
 import re
+import unicodedata
 from typing import Dict, List
 import pandas as pd
 import numpy as np
@@ -20,8 +21,38 @@ ALIASES: Dict[str, List[str]] = {
 # Optional alias (long format)
 POSITION_ALIASES = ["position", "pos", "posicion", "posición"]
 
+# Common textual labels mapping to numeric positions
+POSITION_VALUE_MAP = {
+    "primero": "1",
+    "primer": "1",
+    "1er": "1",
+    "first": "1",
+    "segundo": "2",
+    "segun": "2",
+    "2do": "2",
+    "second": "2",
+    "tercero": "3",
+    "tercer": "3",
+    "3ro": "3",
+    "third": "3",
+    "pos1": "1",
+    "pos2": "2",
+    "pos3": "3",
+    "p1": "1",
+    "p2": "2",
+    "p3": "3",
+}
+
 def _normalize_header(name: str) -> str:
     return re.sub(r"\s+", "", name).strip().lower()
+
+
+def _normalize_token(value: object) -> str:
+    """Normalize textual tokens (strip accents/spaces) before mapping."""
+    text = "" if value is None else str(value).strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"\s+", "", text)
 
 def build_column_map(cols: list[str]) -> Dict[str, str]:
     """Return a mapping {canonical_name: original_name} for wide format.
@@ -75,7 +106,9 @@ def normalize_events_df(df: pd.DataFrame) -> pd.DataFrame:
         out["number"] = out["number"].astype(str).str.strip().str.replace(r"[^\d]", "", regex=True).replace("", np.nan)
         out["number"] = out["number"].astype(float).astype("Int64")  # allow NaN
         out["number"] = out["number"].fillna(0).astype(int).map(lambda x: f"{x:02d}")
-        out["position"] = pd.to_numeric(out["position"], errors="coerce").fillna(0).astype(int)
+        normalized_pos = out["position"].map(_normalize_token)
+        normalized_pos = normalized_pos.replace(POSITION_VALUE_MAP)
+        out["position"] = pd.to_numeric(normalized_pos, errors="coerce").fillna(0).astype(int)
 
         # explode to binary indicators per date,number
         out["pos1"] = (out["position"] == 1).astype(int)
