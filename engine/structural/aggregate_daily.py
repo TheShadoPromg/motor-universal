@@ -4,7 +4,7 @@ import argparse
 import json
 import logging
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -22,7 +22,6 @@ DERIVED_LATEST = DATA_DERIVED / "struct_daily.parquet"
 DEFAULT_BUCKET = os.getenv("STRUCT_DAILY_BUCKET", "motor-struct-daily")
 DEFAULT_PREFIX = os.getenv("STRUCT_DAILY_PREFIX", "struct-daily")
 
-DEFAULT_WINDOW = 120
 DEFAULT_RECENCY_WEIGHT = 0.6
 
 
@@ -67,7 +66,6 @@ def _compute_structural_stats(
     dates: pd.DatetimeIndex,
     matrix: np.ndarray,
     run_idx: int,
-    window_days: int,
     recency_weight: float,
 ) -> pd.DataFrame:
     run_ts = dates[run_idx]
@@ -75,12 +73,11 @@ def _compute_structural_stats(
     history_dates = dates[:run_idx]
 
     numbers = [f"{i:02d}" for i in range(matrix.shape[1])]
-    window_start = run_ts - pd.Timedelta(days=window_days)
-    window_mask = (history_dates >= window_start) & (history_dates < run_ts)
-    window_length = int(window_mask.sum())
-    window_data = history[window_mask]
+    window_length = int(history.shape[0])
+    window_data = history
 
     results: List[Dict[str, object]] = []
+    history_span_days = max((run_ts - dates.min()).days, 1) if len(history_dates) > 0 else 1
 
     for num_idx, num in enumerate(numbers):
         col_hist = history[:, num_idx]
@@ -91,14 +88,14 @@ def _compute_structural_stats(
             days_since_last = (run_ts - last_seen_date).days
         else:
             last_seen_date = None
-            days_since_last = window_days + 1
+            days_since_last = history_span_days + 1
 
         if window_length > 0:
             freq_window = float(window_data[:, num_idx].sum()) / window_length
         else:
             freq_window = 0.0
 
-        recency_component = 1.0 - min(days_since_last, window_days) / window_days
+        recency_component = 1.0 - min(days_since_last, history_span_days) / history_span_days
         score = recency_weight * recency_component + (1 - recency_weight) * freq_window
 
         detail = {
@@ -200,7 +197,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Calcula score estructural por número usando recencia y frecuencia.",
     )
-    parser.add_argument("--window-days", type=int, default=DEFAULT_WINDOW, help="Ventana histórica en días.")
     parser.add_argument(
         "--recency-weight",
         type=float,
@@ -221,9 +217,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if not (0 <= args.recency_weight <= 1):
         raise ValueError("recency-weight debe estar entre 0 y 1.")
-    if args.window_days <= 0:
-        raise ValueError("window-days debe ser > 0.")
-
     panel, source, _fmt = load_or_generate_eventos()
     dates, matrix = _build_matrix(panel)
     if len(dates) == 0:
@@ -245,13 +238,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             base_ts.date(),
         )
 
+    history_length = int(run_idx)
     LOGGER.info(
-        "Calculando struct_daily para %s (ventana=%s días, recency_weight=%.2f)...",
+        "Calculando struct_daily para %s usando %s fechas históricas (recency_weight=%.2f)...",
         run_date,
-        args.window_days,
+        history_length,
         args.recency_weight,
     )
-    df = _compute_structural_stats(dates, matrix, run_idx, args.window_days, args.recency_weight)
+    df = _compute_structural_stats(dates, matrix, run_idx, args.recency_weight)
     if delta_days > 0:
         df["fecha"] = pd.Timestamp(run_date)
         df["dias_desde_ultimo"] = (df["dias_desde_ultimo"] + delta_days).astype(int)
@@ -277,7 +271,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.mlflow_uri,
         params={
             "run_date": run_date.isoformat(),
-            "window_days": str(args.window_days),
             "recency_weight": str(args.recency_weight),
             "events_path": str(source),
         },

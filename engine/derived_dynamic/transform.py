@@ -32,7 +32,6 @@ DEFAULT_K_VALUES = [1, 2, 5, 10, 50]
 DEFAULT_RELATIONS = ["espejo", "complemento", "seq", "sum_mod"]
 
 ALL_NUMBERS = [f"{i:02d}" for i in range(100)]
-WINDOW_WEIGHTS = {90: 90, 180: 180, 360: 360}
 NUMBER_RANGE = np.arange(100)
 
 PANEL_COLUMN_ORDER = ["fecha", "numero", "e_pos1", "e_pos2", "e_pos3"]
@@ -320,47 +319,23 @@ def _add_consistency(base_df: pd.DataFrame) -> pd.DataFrame:
     df = base_df.sort_values(
         ["numero", "tipo_relacion", "lag", "k", "fecha"]
     ).reset_index(drop=True)
-    denom = float(sum(WINDOW_WEIGHTS.values()))
 
     group_keys = ["numero", "tipo_relacion", "lag", "k"]
-    for window, weight in WINDOW_WEIGHTS.items():
-        window_label = f"{window}D"
-        act_col = f"act_{window}"
-        opp_col = f"opp_{window}"
+    grouped = df.groupby(group_keys, sort=False)
+    cumulative_act = grouped["activaciones"].cumsum() - df["activaciones"]
+    cumulative_opp = grouped["oportunidades"].cumsum() - df["oportunidades"]
+    cumulative_act = cumulative_act.clip(lower=0).astype(float)
+    cumulative_opp = cumulative_opp.clip(lower=0).astype(float)
 
-        df_grouped = df.groupby(group_keys)
-        df[act_col] = (
-            df_grouped.rolling(window_label, on="fecha", closed="left")["activaciones"]
-            .sum()
-            .reset_index(drop=True)
-        )
-        df_grouped = df.groupby(group_keys)
-        df[opp_col] = (
-            df_grouped.rolling(window_label, on="fecha", closed="left")["oportunidades"]
-            .sum()
-            .reset_index(drop=True)
-        )
-        prob_col = f"p_{window}"
-        act_vals = df[act_col].to_numpy(dtype=float)
-        opp_vals = df[opp_col].to_numpy(dtype=float)
-        probs = np.divide(
-            act_vals,
-            opp_vals,
-            out=np.zeros_like(act_vals, dtype=float),
-            where=opp_vals > 0,
-        )
-        df[prob_col] = probs * weight
-
-    weighted_sum = sum(
-        (df[f"p_{window}"] for window in WINDOW_WEIGHTS),
-        start=pd.Series(0.0, index=df.index),
+    act_array = cumulative_act.to_numpy(dtype=float)
+    opp_array = cumulative_opp.to_numpy(dtype=float)
+    probs = np.divide(
+        act_array,
+        opp_array,
+        out=np.zeros_like(act_array),
+        where=opp_array > 0,
     )
-    df["consistencia"] = (weighted_sum / denom).astype(float)
-
-    drop_cols = []
-    for window in WINDOW_WEIGHTS:
-        drop_cols.extend([f"act_{window}", f"opp_{window}", f"p_{window}"])
-    df = df.drop(columns=drop_cols)
+    df["consistencia"] = probs
     return df
 
 
