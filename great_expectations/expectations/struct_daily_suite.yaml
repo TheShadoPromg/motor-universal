@@ -6,8 +6,14 @@ expectations:
             "fecha",
             "numero",
             "score_estructural",
+            "score_estructural_corto",
+            "score_estructural_largo",
             "dias_desde_ultimo",
             "freq_ventana",
+            "freq_ventana_corto",
+            "freq_ventana_largo",
+            "recencia_corto",
+            "recencia_largo",
             "detalle_estructural",
           ]
 
@@ -24,12 +30,42 @@ expectations:
         max_value: 1.0
 
   - expect_column_values_to_be_between:
+        column: score_estructural_corto
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
+        column: score_estructural_largo
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
         column: dias_desde_ultimo
         min_value: 0
         mostly: 1.0
 
   - expect_column_values_to_be_between:
         column: freq_ventana
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
+        column: freq_ventana_corto
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
+        column: freq_ventana_largo
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
+        column: recencia_corto
+        min_value: 0.0
+        max_value: 1.0
+
+  - expect_column_values_to_be_between:
+        column: recencia_largo
         min_value: 0.0
         max_value: 1.0
 

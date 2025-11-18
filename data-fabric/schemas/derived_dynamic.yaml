@@ -11,5 +11,7 @@ fields:
   - {name: oportunidades, type: integer, min: 0, required: true}
   - {name: activaciones, type: integer, min: 0, required: true}
   - {name: consistencia, type: number, min: 0, max: 1, required: true}
+  - {name: oportunidades_historial, type: integer, min: 0, required: true, description: "Oportunidades acumuladas en la ventana larga usados para consistencia."}
+  - {name: datos_suficientes, type: boolean, required: true, description: "Indica si la relación cumple el mínimo de oportunidades para contribuir al score final."}
 constraints:
-  not_null: [[fecha, numero, tipo_relacion, lag, oportunidades, activaciones, consistencia]]
+  not_null: [[fecha, numero, tipo_relacion, lag, oportunidades, activaciones, consistencia, oportunidades_historial, datos_suficientes]]

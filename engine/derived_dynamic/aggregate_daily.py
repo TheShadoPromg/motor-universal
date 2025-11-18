@@ -74,6 +74,8 @@ def _build_details(group: pd.DataFrame, top_n: int) -> str:
         by=["activaciones", "consistencia", "oportunidades"],
         ascending=[False, False, False],
     ).head(top_n)
+    has_hist_op = "oportunidades_historial" in ordered.columns
+    has_filter_flag = "datos_suficientes" in ordered.columns
     payload: List[dict] = []
     for _, row in ordered.iterrows():
         payload.append(
@@ -84,6 +86,8 @@ def _build_details(group: pd.DataFrame, top_n: int) -> str:
                 "op": int(row["oportunidades"]),
                 "act": int(row["activaciones"]),
                 "consistencia": round(float(row["consistencia"]), 4),
+                "hist_op": int(row["oportunidades_historial"]) if has_hist_op else None,
+                "datos_suficientes": bool(row["datos_suficientes"]) if has_filter_flag else True,
             }
         )
     return json.dumps(payload, ensure_ascii=False)
@@ -93,50 +97,94 @@ def _aggregate(df: pd.DataFrame, detail_top: int) -> pd.DataFrame:
     data = df.copy()
     data["fecha"] = pd.to_datetime(data["fecha"])
     data["numero"] = data["numero"].astype(str).str.zfill(2)
-    data["weighted_consistencia"] = data["consistencia"] * data["oportunidades"]
+    base_grid = (
+        data[["fecha", "numero"]]
+        .drop_duplicates()
+        .sort_values(["fecha", "numero"])
+        .reset_index(drop=True)
+    )
+    scoring_data = data.copy()
+    if "datos_suficientes" in data.columns:
+        mask = data["datos_suficientes"].astype(bool)
+        excluded = int((~mask).sum())
+        if excluded > 0:
+            LOGGER.info(
+                "Se excluyeron %s combinaciones por histórico insuficiente antes del agregado diario.",
+                excluded,
+            )
+        scoring_data = data.loc[mask].copy()
+    scoring_data["weighted_consistencia"] = scoring_data["consistencia"] * scoring_data["oportunidades"]
 
-    summary = (
-        data.groupby(["fecha", "numero"], sort=True)
-        .agg(
-            oportunidades_total=("oportunidades", "sum"),
-            activaciones_total=("activaciones", "sum"),
-            weighted_consistencia=("weighted_consistencia", "sum"),
-            combinaciones_totales=("tipo_relacion", "size"),
+    summary_cols = [
+        "fecha",
+        "numero",
+        "oportunidades_total",
+        "activaciones_total",
+        "weighted_consistencia",
+        "combinaciones_totales",
+    ]
+    if scoring_data.empty:
+        summary = pd.DataFrame(columns=summary_cols + ["score_derivado"])
+        relaciones = pd.DataFrame(columns=["fecha", "numero", "relaciones_activas"])
+        lags = pd.DataFrame(columns=["fecha", "numero", "lags_activos"])
+        detalles = pd.DataFrame(columns=["fecha", "numero", "detalle_derivado"])
+    else:
+        summary = (
+            scoring_data.groupby(["fecha", "numero"], sort=True)
+            .agg(
+                oportunidades_total=("oportunidades", "sum"),
+                activaciones_total=("activaciones", "sum"),
+                weighted_consistencia=("weighted_consistencia", "sum"),
+                combinaciones_totales=("tipo_relacion", "size"),
+            )
+            .reset_index()
         )
-        .reset_index()
-    )
-    summary["score_derivado"] = np.where(
-        summary["oportunidades_total"] > 0,
-        summary["weighted_consistencia"] / summary["oportunidades_total"],
-        0.0,
-    )
+        summary["score_derivado"] = np.where(
+            summary["oportunidades_total"] > 0,
+            summary["weighted_consistencia"] / summary["oportunidades_total"],
+            0.0,
+        )
+        relaciones = (
+            scoring_data.loc[scoring_data["activaciones"] > 0]
+            .groupby(["fecha", "numero"])["tipo_relacion"]
+            .nunique()
+            .rename("relaciones_activas")
+            .reset_index()
+        )
+        lags = (
+            scoring_data.loc[scoring_data["activaciones"] > 0]
+            .groupby(["fecha", "numero"])["lag"]
+            .nunique()
+            .rename("lags_activos")
+            .reset_index()
+        )
+        detalles = (
+            scoring_data.groupby(["fecha", "numero"], group_keys=False)
+            .apply(lambda g: _build_details(g, detail_top))
+            .rename("detalle_derivado")
+            .reset_index()
+        )
 
-    relaciones = (
-        data.loc[data["activaciones"] > 0]
-        .groupby(["fecha", "numero"])["tipo_relacion"]
-        .nunique()
-        .rename("relaciones_activas")
-        .reset_index()
-    )
-    lags = (
-        data.loc[data["activaciones"] > 0]
-        .groupby(["fecha", "numero"])["lag"]
-        .nunique()
-        .rename("lags_activos")
-        .reset_index()
-    )
-    detalles = (
-        data.groupby(["fecha", "numero"], group_keys=False)
-        .apply(lambda g: _build_details(g, detail_top))
-        .rename("detalle_derivado")
-        .reset_index()
-    )
-
-    result = summary.merge(relaciones, how="left", on=["fecha", "numero"])
+    result = base_grid.merge(summary, how="left", on=["fecha", "numero"])
+    result = result.merge(relaciones, how="left", on=["fecha", "numero"])
     result = result.merge(lags, how="left", on=["fecha", "numero"])
     result = result.merge(detalles, how="left", on=["fecha", "numero"])
-    result["relaciones_activas"] = result["relaciones_activas"].fillna(0).astype(int)
-    result["lags_activos"] = result["lags_activos"].fillna(0).astype(int)
+    fill_zero_cols = [
+        "score_derivado",
+        "oportunidades_total",
+        "activaciones_total",
+        "relaciones_activas",
+        "lags_activos",
+        "combinaciones_totales",
+    ]
+    for col in fill_zero_cols:
+        result[col] = result[col].fillna(0)
+    result["score_derivado"] = result["score_derivado"].astype(float)
+    result["oportunidades_total"] = result["oportunidades_total"].astype(int)
+    result["activaciones_total"] = result["activaciones_total"].astype(int)
+    result["relaciones_activas"] = result["relaciones_activas"].astype(int)
+    result["lags_activos"] = result["lags_activos"].astype(int)
+    result["combinaciones_totales"] = result["combinaciones_totales"].astype(int)
     result["detalle_derivado"] = result["detalle_derivado"].fillna("[]")
     result = result.drop(columns=["weighted_consistencia"])
     return result[

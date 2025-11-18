@@ -49,9 +49,10 @@ Para cada `(t,n,R,k,L)` y ventana `w ∈ {90,180,360}`:
   `oportunidades_w = Σ_{τ∈H_w(t)} oportunidad(τ,n,R,k,L)`
 - Tasa por ventana:  
   `p_w = activaciones_w / oportunidades_w` (si `oportunidades_w=0`, define `p_w = 0`).
-- **Consistencia**: combinación ponderada (recomendada: pesos proporcionales al tamaño de ventana):  
-  pesos `α90=90`, `α180=180`, `α360=360`;  
-  `consistencia(t,n,R,k,L) = (α90*p_90 + α180*p_180 + α360*p_360)/(α90+α180+α360)`.
+- **Consistencia**: combinación ponderada usando `DERIVED_WINDOW_WEIGHTS` (por defecto short=0.5, mid=0.3, long=0.2).  
+  Solo aportan las ventanas que cuenten con oportunidades históricas (los pesos se re-normalizan entre ellas).  
+  `consistencia(t,n,R,k,L) = (Σ w_w * p_w) / (Σ w_w disponibles)`.
+- **Filtro de oportunidades**: se calcula `oportunidades_historial` sobre la ventana “long” y se exige que sea ≥ `MIN_OPORTUNIDADES` (30 por defecto) para considerar la combinación; en caso contrario se marca como `datos_suficientes = False` y no se promedia en el score derivado diario.
 
 ## Salida (dataset `derived_dynamic`)
 Columnas:
@@ -63,6 +64,8 @@ Columnas:
 - `oportunidades` (int ≥ 0) —= `oportunidad(t,...)`
 - `activaciones` (int ≥ 0) —= `activacion(t,...)`
 - `consistencia` (float 0..1) — calculada con ventanas
+- `oportunidades_historial` (int ≥ 0) — oportunidades acumuladas en la ventana larga antes de filtrar.
+- `datos_suficientes` (bool) — indica si la combinación pasa el mínimo y puede contribuir al score agregado.
 
 ## Reglas adicionales
 - Siempre producir exactamente 100×|R|×|K_R|×|L| filas por fecha (no truncar 00–99).

@@ -5,6 +5,7 @@ import logging
 import unicodedata
 import os
 import shutil
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -44,7 +45,26 @@ DERIVED_COLUMNS = [
     "oportunidades",
     "activaciones",
     "consistencia",
+    "oportunidades_historial",
+    "datos_suficientes",
 ]
+DERIVED_WINDOW_CONFIG: "OrderedDict[str, int]" = OrderedDict(
+    [
+        ("short", 90),
+        ("mid", 180),
+        ("long", 360),
+    ]
+)
+# Pesos (se re-normalizan entre ventanas disponibles); ajustar aquí si se desea.
+DERIVED_WINDOW_WEIGHTS: "OrderedDict[str, float]" = OrderedDict(
+    [
+        ("short", 0.5),
+        ("mid", 0.3),
+        ("long", 0.2),
+    ]
+)
+DERIVED_REFERENCE_WINDOW = "long"
+DEFAULT_MIN_OPPORTUNITIES = int(os.getenv("DERIVED_MIN_OPORTUNIDADES", "30"))
 
 LONG_POSITION_COLUMNS = {"posicion", "posición", "position", "pos"}
 
@@ -311,9 +331,25 @@ def _materialize_rule(
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def _add_consistency(base_df: pd.DataFrame) -> pd.DataFrame:
+def _sliding_window_sum(values: np.ndarray, timestamps: np.ndarray, window_days: int) -> np.ndarray:
+    """Suma valores dentro de los últimos `window_days` días excluyendo el día corriente."""
+
+    if len(values) == 0:
+        return np.zeros(0, dtype=np.int64)
+    prefix = np.concatenate(([0], np.cumsum(values, dtype=np.int64)))
+    result = np.zeros(len(values), dtype=np.int64)
+    for idx in range(len(values)):
+        cutoff = timestamps[idx] - window_days
+        start_idx = np.searchsorted(timestamps, cutoff, side="left")
+        result[idx] = prefix[idx] - prefix[start_idx]
+    return result
+
+
+def _add_consistency(base_df: pd.DataFrame, min_opportunities: int) -> pd.DataFrame:
     if base_df.empty:
         base_df["consistencia"] = pd.Series(dtype=float)
+        base_df["oportunidades_historial"] = pd.Series(dtype=int)
+        base_df["datos_suficientes"] = pd.Series(dtype=bool)
         return base_df
 
     df = base_df.sort_values(
@@ -322,20 +358,64 @@ def _add_consistency(base_df: pd.DataFrame) -> pd.DataFrame:
 
     group_keys = ["numero", "tipo_relacion", "lag", "k"]
     grouped = df.groupby(group_keys, sort=False)
-    cumulative_act = grouped["activaciones"].cumsum() - df["activaciones"]
-    cumulative_opp = grouped["oportunidades"].cumsum() - df["oportunidades"]
-    cumulative_act = cumulative_act.clip(lower=0).astype(float)
-    cumulative_opp = cumulative_opp.clip(lower=0).astype(float)
+    window_keys = list(DERIVED_WINDOW_CONFIG.keys())
+    for label in window_keys:
+        df[f"_opp_hist_{label}"] = 0
+        df[f"_act_hist_{label}"] = 0
 
-    act_array = cumulative_act.to_numpy(dtype=float)
-    opp_array = cumulative_opp.to_numpy(dtype=float)
-    probs = np.divide(
-        act_array,
-        opp_array,
-        out=np.zeros_like(act_array),
-        where=opp_array > 0,
+    for _, indices in grouped.indices.items():
+        idx = np.asarray(indices, dtype=np.int64)
+        if len(idx) == 0:
+            continue
+        timestamps = df.loc[idx, "fecha"].to_numpy(dtype="datetime64[D]").astype(np.int64)
+        opp_values = df.loc[idx, "oportunidades"].to_numpy(dtype=np.int64)
+        act_values = df.loc[idx, "activaciones"].to_numpy(dtype=np.int64)
+        for label, window_days in DERIVED_WINDOW_CONFIG.items():
+            df.loc[idx, f"_opp_hist_{label}"] = _sliding_window_sum(opp_values, timestamps, int(window_days))
+            df.loc[idx, f"_act_hist_{label}"] = _sliding_window_sum(act_values, timestamps, int(window_days))
+
+    opp_matrix = []
+    cons_matrix = []
+    weight_vector = np.array(
+        [float(DERIVED_WINDOW_WEIGHTS.get(label, 0.0)) for label in window_keys],
+        dtype=float,
     )
-    df["consistencia"] = probs
+    for label in window_keys:
+        opp_col = df[f"_opp_hist_{label}"].to_numpy(dtype=float)
+        act_col = df[f"_act_hist_{label}"].to_numpy(dtype=float)
+        opp_matrix.append(opp_col)
+        cons_matrix.append(
+            np.divide(
+                act_col,
+                opp_col,
+                out=np.zeros_like(opp_col),
+                where=opp_col > 0,
+            )
+        )
+
+    opp_matrix_np = np.vstack(opp_matrix).T if opp_matrix else np.zeros((len(df), 0))
+    cons_matrix_np = np.vstack(cons_matrix).T if cons_matrix else np.zeros((len(df), 0))
+    available_weights = np.where(opp_matrix_np > 0, weight_vector, 0.0)
+    weight_sum = available_weights.sum(axis=1)
+    weighted_scores = (cons_matrix_np * available_weights).sum(axis=1)
+    df["consistencia"] = np.divide(
+        weighted_scores,
+        weight_sum,
+        out=np.zeros(len(df), dtype=float),
+        where=weight_sum > 0,
+    )
+
+    reference_col = f"_opp_hist_{DERIVED_REFERENCE_WINDOW}"
+    if reference_col not in df.columns:
+        reference_col = f"_opp_hist_{window_keys[-1]}"
+    df["oportunidades_historial"] = df[reference_col].astype(int)
+    df["datos_suficientes"] = (df["oportunidades_historial"] >= int(min_opportunities)).astype(bool)
+    df.loc[~df["datos_suficientes"], "consistencia"] = 0.0
+
+    drop_cols = [f"_opp_hist_{label}" for label in window_keys] + [
+        f"_act_hist_{label}" for label in window_keys
+    ]
+    df = df.drop(columns=drop_cols)
     return df
 
 
@@ -344,6 +424,7 @@ def generate_relations(
     relations: Sequence[str],
     lags: Sequence[int],
     k_values: Sequence[int],
+    min_opportunities: int,
 ) -> pd.DataFrame:
     dates, matrix = _build_appearance_matrix(panel)
     if len(dates) == 0:
@@ -374,7 +455,7 @@ def generate_relations(
     derived["oportunidades"] = derived["oportunidades"].astype(int)
     derived["activaciones"] = derived["activaciones"].astype(int)
 
-    enriched = _add_consistency(derived)
+    enriched = _add_consistency(derived, min_opportunities)
     enriched["fecha"] = pd.to_datetime(enriched["fecha"]).dt.strftime("%Y-%m-%d")
     enriched["numero"] = enriched["numero"].astype(str).str.zfill(2)
     enriched["lag"] = enriched["lag"].astype(int)
@@ -382,6 +463,8 @@ def generate_relations(
     enriched["oportunidades"] = enriched["oportunidades"].astype(int)
     enriched["activaciones"] = enriched["activaciones"].astype(int)
     enriched["consistencia"] = enriched["consistencia"].astype(float)
+    enriched["oportunidades_historial"] = enriched["oportunidades_historial"].astype(int)
+    enriched["datos_suficientes"] = enriched["datos_suficientes"].astype(bool)
 
     return enriched.sort_values(
         ["fecha", "numero", "tipo_relacion", "lag", "k"], na_position="last"
@@ -540,6 +623,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=None,
         help="Prefijo opcional dentro del bucket (se agregará YYYY/MM/DD/archivo).",
     )
+    parser.add_argument(
+        "--min-oportunidades",
+        type=int,
+        default=DEFAULT_MIN_OPPORTUNITIES,
+        help="Mínimo de oportunidades históricas (ventana larga) para considerar una relación.",
+    )
     return parser.parse_args(argv)
 
 
@@ -555,11 +644,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOGGER.error("Error en parámetros de entrada: %s", exc)
         return 2
 
+    min_opportunities = max(int(args.min_oportunidades), 0)
     LOGGER.info(
-        "Parámetros -> lags=%s, k=%s, relaciones=%s",
+        "Parámetros -> lags=%s, k=%s, relaciones=%s, min_oportunidades=%s",
         lags,
         k_values,
         relations,
+        min_opportunities,
     )
 
     panel, source_path, fmt = load_or_generate_eventos()
@@ -569,7 +660,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         len(panel),
     )
 
-    derived = generate_relations(panel, relations, lags, k_values)
+    derived = generate_relations(panel, relations, lags, k_values, min_opportunities)
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
     run_date = _resolve_run_date(args.run_date, derived)
     run_date_str = run_date.strftime("%Y-%m-%d")
@@ -612,6 +703,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "derived_path": str(dated_path),
             "input_format": fmt,
             "run_date": run_date_str,
+            "min_oportunidades": str(min_opportunities),
         },
         metrics={
             "filas": float(len(derived)),

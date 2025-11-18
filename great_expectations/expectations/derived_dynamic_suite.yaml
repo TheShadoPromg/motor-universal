@@ -11,6 +11,8 @@ expectations:
                   "oportunidades",
                   "activaciones",
                   "consistencia",
+                  "oportunidades_historial",
+                  "datos_suficientes",
               ]
 
     - expect_column_values_to_not_be_null:
@@ -54,6 +56,15 @@ expectations:
           min_value: 0.0
           max_value: 1.0
           mostly: 1.0
+
+    - expect_column_values_to_be_between:
+          column: oportunidades_historial
+          min_value: 0
+          mostly: 1.0
+
+    - expect_column_values_to_be_in_set:
+          column: datos_suficientes
+          value_set: [true, false]
 
 meta:
     notes: "Verifica dominios, tipos y 'activaciones ≤ oportunidades'."

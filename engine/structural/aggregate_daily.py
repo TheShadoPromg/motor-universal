@@ -4,6 +4,8 @@ import argparse
 import json
 import logging
 import os
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -23,6 +25,29 @@ DEFAULT_BUCKET = os.getenv("STRUCT_DAILY_BUCKET", "motor-struct-daily")
 DEFAULT_PREFIX = os.getenv("STRUCT_DAILY_PREFIX", "struct-daily")
 
 DEFAULT_RECENCY_WEIGHT = 0.6
+STRUCTURAL_WINDOW_CONFIG: "OrderedDict[str, Optional[int]]" = OrderedDict(
+    [
+        ("corto", 90),
+        ("largo", 360),
+    ]
+)
+# Ventana de referencia para score_estructural "legacy".
+STRUCTURAL_MAIN_WINDOW = "largo"
+
+
+@dataclass(frozen=True)
+class WindowSlice:
+    """Describe una ventana de tiempo sobre el histórico estructural."""
+
+    label: str
+    days: Optional[int]
+    data: np.ndarray
+    dates: pd.DatetimeIndex
+    recency_span: int
+
+    @property
+    def length(self) -> int:
+        return int(self.data.shape[0])
 
 
 def configure_logging() -> None:
@@ -62,25 +87,87 @@ def _find_run_index(dates: pd.DatetimeIndex, run_date: date) -> int:
     return dates.get_loc(ts)
 
 
+def _build_window_slices(
+    history_dates: pd.DatetimeIndex,
+    history_matrix: np.ndarray,
+    run_ts: pd.Timestamp,
+) -> Dict[str, WindowSlice]:
+    """Prepara vistas del histórico para cada ventana definida en STRUCTURAL_WINDOW_CONFIG."""
+
+    if len(history_dates) == 0:
+        return {
+            label: WindowSlice(
+                label=label,
+                days=days,
+                data=history_matrix,
+                dates=history_dates,
+                recency_span=max(int(days or 1), 1),
+            )
+            for label, days in STRUCTURAL_WINDOW_CONFIG.items()
+        }
+
+    global_span = max((run_ts - history_dates.min()).days, 1)
+    slices: Dict[str, WindowSlice] = {}
+    for label, window_days in STRUCTURAL_WINDOW_CONFIG.items():
+        if window_days is None:
+            mask = np.ones(len(history_dates), dtype=bool)
+        else:
+            cutoff = run_ts - pd.Timedelta(days=int(window_days))
+            mask = history_dates >= cutoff
+        mask = np.asarray(mask)
+        window_dates = history_dates[mask]
+        window_data = history_matrix[mask]
+        if len(window_dates) == 0:
+            span = window_days if window_days is not None else global_span
+        else:
+            observed_span = max((run_ts - window_dates.min()).days, 1)
+            span = observed_span if window_days is None else min(int(window_days), observed_span)
+        slices[label] = WindowSlice(
+            label=label,
+            days=window_days,
+            data=window_data,
+            dates=window_dates,
+            recency_span=max(int(span or 1), 1),
+        )
+    return slices
+
+
+def _window_components(window: WindowSlice, num_idx: int, run_ts: pd.Timestamp) -> Tuple[float, float]:
+    """Calcula frecuencia y recencia normalizada para un número dentro de una ventana."""
+
+    if window.length == 0:
+        return 0.0, 0.0
+    column = window.data[:, num_idx]
+    freq = float(column.sum()) / float(window.length)
+    appearances = np.where(column == 1)[0]
+    if appearances.size == 0:
+        return freq, 0.0
+    last_seen = window.dates[appearances[-1]]
+    days_since_last = max((run_ts - last_seen).days, 0)
+    span = max(window.recency_span, 1)
+    recency = max(0.0, 1.0 - min(days_since_last, span) / span)
+    return freq, recency
+
+
 def _compute_structural_stats(
     dates: pd.DatetimeIndex,
     matrix: np.ndarray,
     run_idx: int,
     recency_weight: float,
 ) -> pd.DataFrame:
+    """Combina recencia y frecuencia en cada ventana y expone scores corto/largo."""
     run_ts = dates[run_idx]
     history = matrix[:run_idx]
     history_dates = dates[:run_idx]
 
     numbers = [f"{i:02d}" for i in range(matrix.shape[1])]
-    window_length = int(history.shape[0])
-    window_data = history
-
     results: List[Dict[str, object]] = []
     history_span_days = max((run_ts - dates.min()).days, 1) if len(history_dates) > 0 else 1
+    window_views = _build_window_slices(history_dates, history, run_ts)
+    main_window = STRUCTURAL_MAIN_WINDOW if STRUCTURAL_MAIN_WINDOW in window_views else next(iter(window_views))
 
     for num_idx, num in enumerate(numbers):
-        col_hist = history[:, num_idx]
+        col_hist = history[:, num_idx] if len(history) > 0 else np.zeros(0, dtype=np.int8)
         appearances = np.where(col_hist == 1)[0]
         if appearances.size > 0:
             last_seen_idx = appearances[-1]
@@ -90,36 +177,59 @@ def _compute_structural_stats(
             last_seen_date = None
             days_since_last = history_span_days + 1
 
-        if window_length > 0:
-            freq_window = float(window_data[:, num_idx].sum()) / window_length
-        else:
-            freq_window = 0.0
-
-        recency_component = 1.0 - min(days_since_last, history_span_days) / history_span_days
-        score = recency_weight * recency_component + (1 - recency_weight) * freq_window
+        window_metrics: Dict[str, Dict[str, float]] = {}
+        for label, view in window_views.items():
+            freq_component, recency_component = _window_components(view, num_idx, run_ts)
+            score = recency_weight * recency_component + (1 - recency_weight) * freq_component
+            window_metrics[label] = {
+                "frecuencia": float(freq_component),
+                "recencia": float(recency_component),
+                "score": float(score),
+                "observaciones": float(view.length),
+                "ventana_dias": float(view.days or view.recency_span),
+            }
 
         detail = {
             "ultima_fecha": last_seen_date.strftime("%Y-%m-%d") if last_seen_date is not None else None,
             "dias_desde_ultimo": days_since_last if last_seen_date is not None else None,
-            "frecuencia_ventana": round(freq_window, 4),
-            "ventana_dias": window_length,
             "paridad": "par" if int(num) % 2 == 0 else "impar",
             "alto_bajo": "alto" if int(num) >= 50 else "bajo",
             "decena": int(num) // 10,
             "unidad": int(num) % 10,
+            "ventanas": {
+                label: {
+                    "dias": int(window_views[label].days or window_views[label].recency_span),
+                    "observaciones": int(metrics["observaciones"]),
+                    "frecuencia": round(metrics["frecuencia"], 4),
+                    "recencia": round(metrics["recencia"], 4),
+                    "score": round(metrics["score"], 4),
+                }
+                for label, metrics in window_metrics.items()
+            },
         }
 
-        results.append(
-            {
-                "fecha": run_ts,
-                "numero": num,
-                "score_estructural": round(float(score), 6),
-                "dias_desde_ultimo": int(days_since_last),
-                "freq_ventana": round(freq_window, 6),
-                "detalle_estructural": json.dumps(detail, ensure_ascii=False),
-            }
-        )
-    return pd.DataFrame(results)
+        row: Dict[str, object] = {
+            "fecha": run_ts,
+            "numero": num,
+            "dias_desde_ultimo": int(days_since_last),
+            "detalle_estructural": json.dumps(detail, ensure_ascii=False),
+        }
+        for label, metrics in window_metrics.items():
+            row[f"freq_ventana_{label}"] = round(metrics["frecuencia"], 6)
+            row[f"recencia_{label}"] = round(metrics["recencia"], 6)
+            row[f"score_estructural_{label}"] = round(metrics["score"], 6)
+
+        row["score_estructural"] = row.get(f"score_estructural_{main_window}", 0.0)
+        row["freq_ventana"] = row.get(f"freq_ventana_{main_window}", 0.0)
+        results.append(row)
+
+    df = pd.DataFrame(results)
+    if f"score_estructural_{main_window}" in df.columns:
+        # score_estructural se conserva como alias de la ventana principal (largo por defecto).
+        df["score_estructural"] = df[f"score_estructural_{main_window}"]
+    if f"freq_ventana_{main_window}" in df.columns:
+        df["freq_ventana"] = df[f"freq_ventana_{main_window}"]
+    return df
 
 
 def _build_object_name(prefix: str, run_date: date, filename: str) -> str:
