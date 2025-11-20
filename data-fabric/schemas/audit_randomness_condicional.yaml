@@ -1,0 +1,15 @@
+name: audit_randomness_condicional
+version: 1.0
+primary_key: [numero, run_date]
+description: "Probabilidad condicional de reaparición al día siguiente dado que apareció en t."
+fields:
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: A_n, type: integer, min: 0, required: true, description: "Veces que el número apareció en día t (con t+1 disponible)."}
+  - {name: B_n, type: integer, min: 0, required: true, description: "Veces que también apareció en t+1."}
+  - {name: p_emp_cond, type: number, min: 0, max: 1, required: true}
+  - {name: p_teorico, type: number, min: 0, max: 1, required: true}
+  - {name: desviacion_abs, type: number, required: true}
+  - {name: desviacion_rel, type: number, required: true}
+  - {name: run_date, type: date, required: true}
+constraints:
+  not_null: [[numero, A_n, B_n, p_emp_cond, p_teorico, run_date]]

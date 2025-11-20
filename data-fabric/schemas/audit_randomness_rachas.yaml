@@ -1,0 +1,12 @@
+name: audit_randomness_rachas
+version: 1.0
+primary_key: [scope, fecha, run_date]
+description: "Secuencias (runs) por día para etiquetas de par/impar, alto/bajo, repetición."
+fields:
+  - {name: scope, type: string, enum: [par_impar, alto_bajo, repeticion], required: true}
+  - {name: fecha, type: date, required: true}
+  - {name: label, type: string, required: true}
+  - {name: run_id, type: integer, min: 1, required: true}
+  - {name: run_date, type: date, required: true}
+constraints:
+  not_null: [[scope, fecha, label, run_id, run_date]]

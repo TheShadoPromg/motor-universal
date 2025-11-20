@@ -1,0 +1,16 @@
+name: audit_randomness_categorias_posicion
+version: 1.0
+primary_key: [categoria_tipo, categoria_valor, posicion, run_date]
+description: "Categorías simples por posición (par/impar, alto/bajo) contra uniformidad."
+fields:
+  - {name: categoria_tipo, type: string, enum: [par_impar, alto_bajo], required: true}
+  - {name: categoria_valor, type: string, required: true}
+  - {name: posicion, type: integer, enum: [1,2,3], required: true}
+  - {name: count, type: integer, min: 0, required: true}
+  - {name: esperado, type: number, min: 0, required: true}
+  - {name: freq_relativa, type: number, min: 0, max: 1, required: true}
+  - {name: desviacion_abs, type: number, required: true}
+  - {name: desviacion_rel, type: number, required: true}
+  - {name: run_date, type: date, required: true}
+constraints:
+  not_null: [[categoria_tipo, categoria_valor, posicion, count, esperado, run_date]]

@@ -1,0 +1,11 @@
+name: audit_randomness_repeticion
+version: 1.0
+primary_key: [fecha_t, fecha_t1, run_date]
+description: "Repetición de números entre días consecutivos."
+fields:
+  - {name: fecha_t, type: date, required: true}
+  - {name: fecha_t1, type: date, required: true}
+  - {name: repetidos_t_t1, type: integer, min: 0, max: 3, required: true}
+  - {name: run_date, type: date, required: true}
+constraints:
+  not_null: [[fecha_t, fecha_t1, repetidos_t_t1, run_date]]

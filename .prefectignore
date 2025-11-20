@@ -1,0 +1,24 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+.git/
+.gitignore
+.venv/
+env/
+.envrc
+*.pid
+*.log
+
+# Datos generados/pesados que no son necesarios para empaquetar el flow
+artifacts/
+data/derived/
+data/tmp/
+great_expectations/uncommitted/
+
+# Archivos grandes auxiliares opcionales (solo outputs derivados)
+data/derived/**/*.parquet
+data/derived/**/*.feather
+data/derived/**/*.csv.gz

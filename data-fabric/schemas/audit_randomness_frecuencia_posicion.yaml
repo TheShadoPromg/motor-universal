@@ -1,0 +1,16 @@
+name: audit_randomness_frecuencia_posicion
+version: 1.0
+primary_key: [numero, posicion, run_date]
+description: "Frecuencia por posición de números 00-99 vs modelo uniforme."
+fields:
+  - {name: numero, type: string, format: "NN", domain: [00..99], required: true}
+  - {name: posicion, type: integer, enum: [1,2,3], required: true}
+  - {name: count_pos, type: integer, min: 0, required: true}
+  - {name: esperado_pos, type: number, min: 0, required: true}
+  - {name: freq_relativa_pos, type: number, min: 0, max: 1, required: true}
+  - {name: desviacion_abs, type: number, required: true}
+  - {name: desviacion_rel, type: number, required: true}
+  - {name: residual_estandarizado, type: number, required: true}
+  - {name: run_date, type: date, required: true}
+constraints:
+  not_null: [[numero, posicion, count_pos, esperado_pos, freq_relativa_pos, run_date]]
