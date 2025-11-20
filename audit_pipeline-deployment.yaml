@@ -1,0 +1,53 @@
+###
+### A complete description of a Prefect Deployment for flow 'audit_randomness_pipeline'
+###
+name: audit-pipeline
+description: null
+version: 62caf98dd9340f3f28fc2ee55bf52cf1
+# The work queue that will handle this deployment's runs
+work_queue_name: default
+work_pool_name: default-process-pool
+tags: []
+parameters: {}
+schedule: null
+schedules: []
+is_schedule_active: null
+infra_overrides: {}
+
+###
+### DO NOT EDIT BELOW THIS LINE
+###
+flow_name: audit_randomness_pipeline
+manifest_path: null
+infrastructure:
+  type: process
+  env: {}
+  labels: {}
+  name: null
+  command: null
+  stream_output: true
+  working_dir: null
+  _block_document_id: 42dfee65-4c8f-43a8-a943-5a23ba41b523
+  _block_document_name: anonymous-e2069547-b117-49ca-be27-c0f4d9a99bfa
+  _is_anonymous: true
+  block_type_slug: process
+  _block_type_slug: process
+storage: null
+path: /opt/motor
+entrypoint: flows\audit_pipeline.py:audit_pipeline
+parameter_openapi_schema:
+  title: Parameters
+  type: object
+  properties:
+    run_date:
+      anyOf:
+      - type: string
+      - type: 'null'
+      default: null
+      position: 0
+      title: run_date
+  required: null
+  definitions: null
+timestamp: '2025-11-20T19:37:19.199347+00:00'
+triggers: []
+enforce_parameter_schema: null

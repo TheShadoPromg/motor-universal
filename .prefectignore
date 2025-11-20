@@ -16,6 +16,7 @@ env/
 artifacts/
 data/derived/
 data/tmp/
+data/audit/
 great_expectations/uncommitted/
 
 # Archivos grandes auxiliares opcionales (solo outputs derivados)

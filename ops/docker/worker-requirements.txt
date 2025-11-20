@@ -6,3 +6,4 @@ mlflow==2.15.1
 great_expectations==0.18.22
 SQLAlchemy==2.0.35
 psycopg2-binary==2.9.9
+scipy==1.11.4
