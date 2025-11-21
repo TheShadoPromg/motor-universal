@@ -30,6 +30,22 @@ services:
       - "9001:9001"
     volumes:
       - minio:/data
+  minio-setup:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    env_file:
+      - ../../.env
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      set -e
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
+      for b in motor-artifacts motor-derived-dynamic motor-derived-daily motor-cross-daily motor-struct-daily motor-fusion motor-predictions; do
+        mc mb -p local/$b || true
+        mc anonymous set download local/$b || true
+      done
+    restart: "no"
 
   prefect:
     image: prefecthq/prefect:2-latest
@@ -80,6 +96,8 @@ services:
     depends_on:
       prefect:
         condition: service_started
+      minio-setup:
+        condition: service_completed_successfully
     volumes:
       - ../..:/opt/motor
 
@@ -91,12 +109,15 @@ services:
     env_file:
       - ../../.env
     environment:
-      PREDICTIONS_DB_URL: ${PREDICTIONS_DB_URL}
+      # fallback evita que una variable vacía en el host sobrescriba el valor del .env
+      PREDICTIONS_DB_URL: ${PREDICTIONS_DB_URL:-postgresql+psycopg2://admin:admin@postgres:5432/motor}
     command: >
       streamlit run apps/streamlit/app.py --server.address 0.0.0.0 --server.port 8501
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ../..:/opt/motor
     ports:
       - "8501:8501"
 
@@ -127,6 +148,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      minio-setup:
+        condition: service_completed_successfully
 
   # Desactivado por defecto: solo se levanta con --profile api
   api:

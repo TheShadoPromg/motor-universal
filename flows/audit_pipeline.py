@@ -20,13 +20,15 @@ def _run_main(module_main, args):
         raise RuntimeError(f"El módulo {module_main.__module__} finalizó con código {code}.")
 
 
-@task
-def run_audit_randomness(run_date: str):
+@task(persist_result=True)
+def run_audit_randomness(run_date: str) -> str:
     args = ["--run-date", run_date]
     audit_dir = os.getenv("AUDIT_RANDOMNESS_DIR")
     if audit_dir:
         args += ["--output-dir", audit_dir]
     _run_main(audit_randomness.main, args)
+    output_dir = audit_dir or str(audit_randomness.DEFAULT_OUTPUT_DIR)
+    return f"Audit artifacts stored in {output_dir} for run_date={run_date}"
 
 
 @flow(name="audit_randomness_pipeline")
