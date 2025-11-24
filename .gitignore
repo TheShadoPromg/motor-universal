@@ -15,3 +15,14 @@ node_modules/
 .DS_Store
 .vscode/
 .idea/
+data/audit/estructural/estructuras_intradiarias_sumas_resumen.csv
+data/audit/estructural/sesgos_por_dia_semana_resumen.csv
+data/audit/estructural/sesgos_resumen_global_fase2.csv
+data/audit/estructural/transiciones_categorias.csv
+data/audit/estructural/transiciones_consecutivo_anypos_anypos.csv
+data/audit/estructural/transiciones_consecutivo_pos_pos.csv
+data/audit/estructural/transiciones_espejo_anypos_anypos.csv
+data/audit/estructural/transiciones_espejo_pos_pos.csv
+data/audit/estructural/transiciones_numero_anypos_anypos.csv
+data/audit/estructural/transiciones_numero_anypos_pos.csv
+data/audit/estructural/transiciones_numero_pos_pos.csv
