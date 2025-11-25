@@ -8,10 +8,14 @@ services:
       POSTGRES_USER: ${PGUSER}
       POSTGRES_PASSWORD: ${PGPASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
+    command: ["postgres", "-c", "hba_file=/var/lib/postgresql/data/pgdata/pg_hba.conf", "-c", "listen_addresses=*"]
     ports:
-      - "5432:5432"
+      # Permit overriding host port to avoid clashes with local Postgres installs.
+      - "${HOST_PGPORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Se monta en modo rw para permitir al entrypoint ajustar permisos/propietario.
+      - ./conf/pg_hba.conf:/var/lib/postgresql/data/pgdata/pg_hba.conf:rw
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PGUSER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -42,8 +46,8 @@ services:
       set -e
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
       for b in motor-artifacts motor-derived-dynamic motor-derived-daily motor-cross-daily motor-struct-daily motor-fusion motor-predictions; do
-        mc mb -p local/$b || true
-        mc anonymous set download local/$b || true
+        mc mb -p local/$$b || true
+        mc anonymous set download local/$$b || true
       done
     restart: "no"
 

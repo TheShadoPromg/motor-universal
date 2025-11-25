@@ -18,6 +18,7 @@ LOGGER = logging.getLogger("audit.estructural")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT = REPO_ROOT / "data" / "raw" / "eventos_numericos.csv"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "audit" / "estructural"
+PARQUET_ENGINE = "pyarrow"
 
 CONFIG = {
     "L_min": 1,
@@ -609,6 +610,11 @@ def _save_csv(df: pd.DataFrame, path: Path) -> None:
     df.to_csv(path, index=False)
 
 
+def _save_parquet(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, index=False, engine=PARQUET_ENGINE)
+
+
 def run_structural_audit(
     run_date: date,
     input_path: str,
@@ -618,6 +624,7 @@ def run_structural_audit(
     skip_validation: bool = False,
     incluir_lags_ext: bool = False,
     incluir_compuestos: bool = False,
+    output_format: str = "parquet",
 ) -> Dict[str, pd.DataFrame]:
     LOGGER.info("Iniciando auditoria estructural (Fase 2) para run_date=%s", run_date)
     raw_df = randomness._read_events(Path(input_path))
@@ -711,58 +718,66 @@ def run_structural_audit(
 
     output_base = Path(output_dir)
     output_base.mkdir(parents=True, exist_ok=True)
+    do_parquet = output_format in {"parquet", "both"}
+    do_csv = output_format in {"csv", "both"}
 
-    _save_csv(
+    def _save(df: pd.DataFrame, stem: str) -> None:
+        if do_parquet:
+            _save_parquet(df, output_base / f"{stem}.parquet")
+        if do_csv:
+            _save_csv(df, output_base / f"{stem}.csv")
+
+    _save(
         transiciones_numero[
             (transiciones_numero["pos_origen"] == "ANY") & (transiciones_numero["pos_destino"] == "ANY")
         ],
-        output_base / "transiciones_numero_anypos_anypos.csv",
+        "transiciones_numero_anypos_anypos",
     )
-    _save_csv(
+    _save(
         transiciones_numero[
             (transiciones_numero["pos_origen"] == "ANY") & (transiciones_numero["pos_destino"].isin([1, 2, 3]))
         ],
-        output_base / "transiciones_numero_anypos_pos.csv",
+        "transiciones_numero_anypos_pos",
     )
-    _save_csv(
+    _save(
         transiciones_numero[
             (transiciones_numero["pos_origen"].isin([1, 2, 3])) & (transiciones_numero["pos_destino"].isin([1, 2, 3]))
         ],
-        output_base / "transiciones_numero_pos_pos.csv",
+        "transiciones_numero_pos_pos",
     )
 
-    _save_csv(
+    _save(
         transiciones_espejo[
             (transiciones_espejo["pos_origen"] == "ANY") & (transiciones_espejo["pos_destino"] == "ANY")
         ],
-        output_base / "transiciones_espejo_anypos_anypos.csv",
+        "transiciones_espejo_anypos_anypos",
     )
-    _save_csv(
+    _save(
         transiciones_espejo[
             (transiciones_espejo["pos_origen"].isin([1, 2, 3])) & (transiciones_espejo["pos_destino"].isin([1, 2, 3]))
         ],
-        output_base / "transiciones_espejo_pos_pos.csv",
+        "transiciones_espejo_pos_pos",
     )
 
-    _save_csv(
+    _save(
         transiciones_consecutivo[
             (transiciones_consecutivo["pos_origen"] == "ANY") & (transiciones_consecutivo["pos_destino"] == "ANY")
         ],
-        output_base / "transiciones_consecutivo_anypos_anypos.csv",
+        "transiciones_consecutivo_anypos_anypos",
     )
-    _save_csv(
+    _save(
         transiciones_consecutivo[
             (transiciones_consecutivo["pos_origen"].isin([1, 2, 3])) & (transiciones_consecutivo["pos_destino"].isin([1, 2, 3]))
         ],
-        output_base / "transiciones_consecutivo_pos_pos.csv",
+        "transiciones_consecutivo_pos_pos",
     )
 
-    _save_csv(transiciones_categorias, output_base / "transiciones_categorias.csv")
-    _save_csv(intradiario, output_base / "estructuras_intradiarias_sumas_resumen.csv")
-    _save_csv(sesgos_dia, output_base / "sesgos_por_dia_semana_resumen.csv")
-    _save_csv(resumen_global, output_base / "sesgos_resumen_global_fase2.csv")
+    _save(transiciones_categorias, "transiciones_categorias")
+    _save(intradiario, "estructuras_intradiarias_sumas_resumen")
+    _save(sesgos_dia, "sesgos_por_dia_semana_resumen")
+    _save(resumen_global, "sesgos_resumen_global_fase2")
 
-    LOGGER.info("Auditoria estructural completada. Artefactos guardados en %s", output_base)
+    LOGGER.info("Auditoria estructural completada. Artefactos guardados en %s (formato=%s)", output_base, output_format)
 
     return {
         "transiciones_numero": transiciones_numero,
@@ -783,6 +798,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--start-date", default=None, help="Fecha inicial a incluir (YYYY-MM-DD).")
     parser.add_argument("--end-date", default=None, help="Fecha final a incluir (YYYY-MM-DD).")
     parser.add_argument("--skip-validation", action="store_true", help="Omite validaciones externas adicionales.")
+    parser.add_argument(
+        "--output-format",
+        default="parquet",
+        choices=["parquet", "csv", "both"],
+        help="Formato de salida (parquet por defecto, csv como cortesía, both para ambos).",
+    )
     parser.add_argument(
         "--include-extended-lags",
         action="store_true",
@@ -812,6 +833,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             skip_validation=args.skip_validation,
             incluir_lags_ext=args.include_extended_lags,
             incluir_compuestos=args.include_compuestos,
+            output_format=args.output_format,
         )
     except Exception as exc:
         LOGGER.error("La auditoria estructural fallo: %s", exc)

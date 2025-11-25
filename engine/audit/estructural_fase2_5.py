@@ -14,6 +14,7 @@ LOGGER = logging.getLogger("audit.estructural_fase2_5")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = REPO_ROOT / "data" / "audit" / "estructural"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "audit" / "estructural_fase2_5"
+PARQUET_ENGINE = "pyarrow"
 
 PERIODOS = ["2011_2014", "2015_2018", "2019_2022", "2023_2025"]
 MIN_OPORTUNIDADES_PERIOD = 30
@@ -26,9 +27,11 @@ def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def _read_csv(path: Path) -> pd.DataFrame:
+def _read_table(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"No se encontro el archivo requerido: {path}")
+    if path.suffix.lower() == ".parquet":
+        return pd.read_parquet(path)
     return pd.read_csv(path)
 
 
@@ -65,7 +68,7 @@ def _compute_numero_destino(tipo_relacion: str, numero_base: int) -> Optional[in
 
 
 def load_sesgos_resumen(path: Path) -> pd.DataFrame:
-    df = _read_csv(path)
+    df = _read_table(path)
     # Normalizar nombres esperados
     rename_map = {
         "numero": "numero_base",
@@ -139,23 +142,24 @@ def _normalize_transiciones(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_transiciones(path_dir: Path) -> Dict[str, pd.DataFrame]:
-    files = {
-        "numero_any_any": "transiciones_numero_anypos_anypos.csv",
-        "numero_any_pos": "transiciones_numero_anypos_pos.csv",
-        "numero_pos_pos": "transiciones_numero_pos_pos.csv",
-        "espejo_any_any": "transiciones_espejo_anypos_anypos.csv",
-        "espejo_pos_pos": "transiciones_espejo_pos_pos.csv",
-        "consec_any_any": "transiciones_consecutivo_anypos_anypos.csv",
-        "consec_pos_pos": "transiciones_consecutivo_pos_pos.csv",
+    # Admitimos parquet o csv; preferimos parquet si existe.
+    candidates = {
+        "numero_any_any": ["transiciones_numero_anypos_anypos.parquet", "transiciones_numero_anypos_anypos.csv"],
+        "numero_any_pos": ["transiciones_numero_anypos_pos.parquet", "transiciones_numero_anypos_pos.csv"],
+        "numero_pos_pos": ["transiciones_numero_pos_pos.parquet", "transiciones_numero_pos_pos.csv"],
+        "espejo_any_any": ["transiciones_espejo_anypos_anypos.parquet", "transiciones_espejo_anypos_anypos.csv"],
+        "espejo_pos_pos": ["transiciones_espejo_pos_pos.parquet", "transiciones_espejo_pos_pos.csv"],
+        "consec_any_any": ["transiciones_consecutivo_anypos_anypos.parquet", "transiciones_consecutivo_anypos_anypos.csv"],
+        "consec_pos_pos": ["transiciones_consecutivo_pos_pos.parquet", "transiciones_consecutivo_pos_pos.csv"],
     }
     result: Dict[str, pd.DataFrame] = {}
-    for key, filename in files.items():
-        file_path = path_dir / filename
-        if not file_path.exists():
-            LOGGER.warning("No se encontro %s; se usara DataFrame vacio.", file_path)
+    for key, names in candidates.items():
+        file_path = next((path_dir / name for name in names if (path_dir / name).exists()), None)
+        if file_path is None:
+            LOGGER.warning("No se encontro archivo de transiciones para %s; se usara DataFrame vacio.", key)
             result[key] = pd.DataFrame()
             continue
-        df = _read_csv(file_path)
+        df = _read_table(file_path)
         result[key] = _normalize_transiciones(df)
     return result
 
@@ -374,12 +378,19 @@ def run_structural_fase2_5(input_dir: Path, output_dir: Path) -> None:
     resumen_df = pd.DataFrame(resumen_rows)
     period_df = pd.DataFrame(period_rows)
 
+    # Salida parquet por defecto, CSV como cortesía para inspección rápida
+    resumen_df.to_parquet(output_dir / "sesgos_fase2_5_resumen.parquet", index=False, engine=PARQUET_ENGINE)
+    period_df.to_parquet(output_dir / "sesgos_fase2_5_por_periodo.parquet", index=False, engine=PARQUET_ENGINE)
+    core_periodicos = resumen_df[resumen_df["clasificacion_fase2_5"].isin(["core_global", "periodico"])]
+    core_periodicos.to_parquet(
+        output_dir / "sesgos_fase2_5_core_y_periodicos.parquet", index=False, engine=PARQUET_ENGINE
+    )
+
     resumen_df.to_csv(output_dir / "sesgos_fase2_5_resumen.csv", index=False)
     period_df.to_csv(output_dir / "sesgos_fase2_5_por_periodo.csv", index=False)
-    core_periodicos = resumen_df[resumen_df["clasificacion_fase2_5"].isin(["core_global", "periodico"])]
     core_periodicos.to_csv(output_dir / "sesgos_fase2_5_core_y_periodicos.csv", index=False)
 
-    LOGGER.info("Fase 2.5 completada. Archivos escritos en %s", output_dir)
+    LOGGER.info("Fase 2.5 completada. Archivos escritos en %s (parquet + csv cortesía)", output_dir)
 
 
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:

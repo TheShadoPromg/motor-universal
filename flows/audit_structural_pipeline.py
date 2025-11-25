@@ -22,7 +22,7 @@ def _run_main(module_main, args):
 
 @task(persist_result=True)
 def run_audit_structural(run_date: str) -> str:
-    args = ["--run-date", run_date]
+    args = ["--run-date", run_date, "--output-format", "parquet"]
     audit_dir = os.getenv("AUDIT_ESTRUCTURAL_DIR")
     if audit_dir:
         args += ["--output-dir", audit_dir]

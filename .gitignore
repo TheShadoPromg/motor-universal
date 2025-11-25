@@ -26,3 +26,10 @@ data/audit/estructural/transiciones_espejo_pos_pos.csv
 data/audit/estructural/transiciones_numero_anypos_anypos.csv
 data/audit/estructural/transiciones_numero_anypos_pos.csv
 data/audit/estructural/transiciones_numero_pos_pos.csv
+data/activadores/activadores_dinamicos_fase3_core_y_periodicos.csv
+.gitignore
+data/activadores/activadores_dinamicos_fase3_para_motor.csv
+data/activadores/activadores_dinamicos_fase3_raw.csv
+data/audit/estructural_fase2_5/sesgos_fase2_5_core_y_periodicos.csv
+data/audit/estructural_fase2_5/sesgos_fase2_5_por_periodo.csv
+data/audit/estructural_fase2_5/sesgos_fase2_5_resumen.csv
