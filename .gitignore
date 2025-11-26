@@ -33,3 +33,6 @@ data/activadores/activadores_dinamicos_fase3_raw.csv
 data/audit/estructural_fase2_5/sesgos_fase2_5_core_y_periodicos.csv
 data/audit/estructural_fase2_5/sesgos_fase2_5_por_periodo.csv
 data/audit/estructural_fase2_5/sesgos_fase2_5_resumen.csv
+data/outputs/phase4_grid.txt
+data/outputs/phase4/phase4_details.csv
+data/outputs/phase4/phase4_summary.csv
