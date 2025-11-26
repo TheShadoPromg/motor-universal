@@ -1,3 +1,4 @@
+"""Helper de almacenamiento: subida de artefactos a S3/MinIO con boto3 si está disponible."""
 from __future__ import annotations
 
 import logging

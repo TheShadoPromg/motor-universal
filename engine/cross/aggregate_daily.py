@@ -1,3 +1,9 @@
+"""Capa cross: agrega activaciones origen→destino por lags y genera score_cruzado diario.
+
+- Lee eventos normalizados y cuenta oportunidades/activaciones entre posiciones.
+- Genera parquet diario + último snapshot, sube a S3 opcional, valida con GE opcional.
+- Opcionalmente loguea a MLflow. Pensado para correr en pipeline diario (Prefect).
+"""
 from __future__ import annotations
 
 import argparse

@@ -40,3 +40,7 @@ def audit_pipeline(run_date: Optional[str] = None):
 
 if __name__ == "__main__":
     audit_pipeline()
+"""Prefect flow: ejecuta auditoría de aleatoriedad (Fase 1) para un run_date dado.
+
+Orquesta `engine.audit.randomness` y devuelve ubicación de artefactos.
+"""

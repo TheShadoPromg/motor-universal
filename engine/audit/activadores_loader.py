@@ -1,3 +1,10 @@
+"""Carga activadores Fase 3 en base de datos (Postgres o fallback SQLite).
+
+- Lee Parquet/CSV generado por Fase 3 (`activadores_dinamicos_fase3_para_motor`).
+- Valida columnas requeridas y agrega metadatos (`run_date`, `ingestion_ts`).
+- Inserta en la tabla `activadores_dinamicos_fase3` (configurable) con SQLAlchemy.
+- Si falla la DB destino y se permite, usa SQLite local como respaldo.
+"""
 from __future__ import annotations
 
 import argparse

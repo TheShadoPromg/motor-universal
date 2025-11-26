@@ -211,3 +211,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+"""Genera predicciones calibradas desde la fusión y opcionalmente las persiste en Postgres.
+
+- Lee jugadas fusionadas (parquet), aplica softmax (temperatura), añade rank y prob_raw/prob.
+- Guarda snapshot diario y última versión; sube a S3 opcional.
+- Si se provee DB URL, inserta/replace en `predictions_daily`.
+"""

@@ -65,3 +65,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+"""Registro de deployment Prefect para el flujo diario (daily_pipeline)."""

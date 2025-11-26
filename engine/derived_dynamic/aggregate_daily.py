@@ -1,3 +1,9 @@
+"""Agregado diario de la capa derivada dinámica.
+
+- Resume activaciones/consistencias por número a partir de derived_dynamic (ventanas y lags).
+- Calcula score_derivado y top de reglas activas, exporta parquet diario + snapshot.
+- Puede subir a S3; pensada para usarse tras transform.py en el flujo diario.
+"""
 from __future__ import annotations
 
 import argparse

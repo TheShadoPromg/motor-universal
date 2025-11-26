@@ -45,3 +45,4 @@ def audit_structural_fase3_pipeline(run_date: Optional[str] = None):
 
 if __name__ == "__main__":
     audit_structural_fase3_pipeline()
+"""Prefect flow: ejecuta Fase 3 (activadores dinámicos) a partir de sesgos Fase 2.5."""

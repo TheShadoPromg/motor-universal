@@ -13,3 +13,4 @@ for c in ["pos1","pos2","pos3"]:
     print("TOTAL filas:", len(s), "   MAL:", (~ok).sum())
     print("Top valores problemáticos:")
     print(bad if len(bad) else "(sin problemas)")
+"""Inspección rápida de draws: estadísticas básicas y validación visual/logs."""

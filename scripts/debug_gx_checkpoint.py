@@ -27,3 +27,4 @@ for key, val in res["run_results"].items():
                 print("   •", r["expectation_config"]["expectation_type"], r["result"])
 print("\nFAILED ITEMS:")
 pprint(failed)
+"""Debug de checkpoints GE: ejecuta un checkpoint específico y muestra resultados."""

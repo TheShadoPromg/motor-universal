@@ -1,3 +1,9 @@
+"""Auditoría estructural (Fase 2) sobre eventos_numericos.
+
+Calcula sesgos origen->destino por lags, clasifica por periodo y exporta métricas
+para alimentar Fase 2.5/3. No recalcula reglas dinámicas; produce tabulados de sesgos
+core/extendidos y marcadores de fortaleza por periodo.
+"""
 from __future__ import annotations
 
 import argparse

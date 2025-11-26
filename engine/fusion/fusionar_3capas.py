@@ -389,3 +389,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+"""Fusión de scores de tres capas (cross, estructural, derivada) en distribución diaria 00-99.
+
+- Lee parquets diarios de cada capa, asegura grid completo, pondera scores (weights C/E/D),
+  aplica softmax (temperatura configurable) y construye tipo_convergencia y detalles combinados.
+- Valida con Great Expectations opcional, sube a S3, y guarda snapshot + última versión.
+"""

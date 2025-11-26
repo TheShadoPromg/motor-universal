@@ -724,3 +724,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+"""Transformación de eventos a capa derivada dinámica.
+
+- Normaliza eventos (long/wide) a panel 00-99 y genera derived_dynamic con relaciones (espejo, sum_mod, seq, complemento)
+  evaluadas en múltiples lags y ventanas.
+- Controla oportunidades/activaciones, consistencia y flags de datos suficientes.
+- Exporta parquet canonical y snapshots, con opción de carga a S3.
+"""

@@ -78,3 +78,4 @@ def daily_pipeline(run_date: Optional[str] = None, fusion_weights: str = "0.4,0.
 
 if __name__ == "__main__":
     daily_pipeline()
+"""Prefect flow diario del motor: derived_dynamic -> cross -> structural -> fusión -> predicciones."""

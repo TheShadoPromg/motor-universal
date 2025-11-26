@@ -42,3 +42,4 @@ suite_obj.expectation_suite_name = SUITE  # <--- línea clave
 ctx.add_or_update_expectation_suite(expectation_suite=suite_obj)
 ctx.build_data_docs()
 print(f"✅ Suite '{SUITE}' actualizada (validación 0–99 tolerante).")
+"""Reconstruye suite de draws en Great Expectations (útil tras cambios de esquema/datos)."""

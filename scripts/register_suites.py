@@ -52,3 +52,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""Registra suites GE en el contexto (draws/events/otros) para ejecución posterior."""

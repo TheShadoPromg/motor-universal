@@ -1,3 +1,9 @@
+"""Fase 2.5 - Estabilidad de sesgos estructurales por periodo.
+
+Consume salidas de Fase 2, evalúa delta_rel y estabilidad por bloques
+temporales, clasifica en core/periodico/extendido y exporta tablas
+para Fase 3. No recalcula transiciones; solo resume y etiqueta.
+"""
 from __future__ import annotations
 
 import argparse
@@ -420,3 +426,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+"""Fase 2.5 - Estabilidad de sesgos estructurales por periodo.
+
+Consume salidas de Fase 2 y etiqueta sesgos como core/periodico/extendido según
+su estabilidad y delta relativo entre periodos. Genera resúmenes por periodo y
+core+periódicos para uso en Fase 3 (activadores dinámicos).
+"""

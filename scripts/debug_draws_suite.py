@@ -14,3 +14,4 @@ for key, val in res["run_results"].items():
                 cols = r["expectation_config"]["kwargs"]
                 print(f"❌ Expectation failed: {e_type}")
                 print("   → Details:", cols)
+"""Utilidad de depuración para suites de draws en GE (imprime/valida expectativas)."""

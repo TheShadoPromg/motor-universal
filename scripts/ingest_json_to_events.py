@@ -68,3 +68,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""Ingesta JSON de sorteos a CSV canónico de eventos (date, position, number)."""

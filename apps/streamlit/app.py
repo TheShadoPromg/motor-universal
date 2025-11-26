@@ -1,3 +1,9 @@
+"""Panel Streamlit para visualizar predicciones y auditoría.
+
+- Lee `predictions_daily` desde Postgres y permite explorar top-N, métricas y descargar CSV.
+- Consume artefactos de auditoría de aleatoriedad para descarga/inspección (parquet->XLSX/ZIP/PDF).
+- Sirve como UI operativa para validar runs diarios sin tocar el motor.
+"""
 from __future__ import annotations
 
 import json

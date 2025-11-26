@@ -40,3 +40,4 @@ def audit_structural_pipeline(run_date: Optional[str] = None):
 
 if __name__ == "__main__":
     audit_structural_pipeline()
+"""Prefect flow: corre Fase 2 de auditoría estructural (sesgos origen→destino por lags)."""

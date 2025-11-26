@@ -41,3 +41,4 @@ def audit_structural_fase2_5_pipeline(run_date: Optional[str] = None):
 
 if __name__ == "__main__":
     audit_structural_fase2_5_pipeline()
+"""Prefect flow: corre Fase 2.5 (estabilidad por periodo) usando outputs de Fase 2."""

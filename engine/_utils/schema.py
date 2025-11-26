@@ -1,4 +1,10 @@
 # engine/_utils/schema.py
+"""Normalización de datos de eventos a formato canónico.
+
+Convierte datasets long/wide de sorteos en un panel con columnas date, number, pos1/pos2/pos3,
+validando alias de cabeceras y tipos. Usado por transformaciones del motor para asegurar
+que 00-99 y fechas estén completos antes de calcular scores.
+"""
 from __future__ import annotations
 import re
 import unicodedata

@@ -44,3 +44,4 @@ suite_obj.expectation_suite_name = SUITE
 ctx.add_or_update_expectation_suite(expectation_suite=suite_obj)
 ctx.build_data_docs()
 print("✅ Built/updated suite 'events_suite' (long/wide supported).")
+"""Construye suite de expectativas GE para events (versión en inglés del dataset)."""

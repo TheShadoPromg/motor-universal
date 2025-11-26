@@ -399,3 +399,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+"""Capa estructural: combina frecuencia y recencia por ventanas para cada número.
+
+- Calcula score_estructural (ventanas corto/largo) y detalle por número (última aparición, paridad, alto/bajo).
+- Exporta parquet diario + último snapshot, sube a S3 opcional, valida con GE opcional y puede loguear a MLflow.
+- Pensada para correr en el flujo diario del motor.
+"""

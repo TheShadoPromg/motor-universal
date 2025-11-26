@@ -98,3 +98,4 @@ if __name__ == "__main__":
         args += ["--db-url", db_url]
     args += ["--table", os.getenv("ACTIVADORES_TABLE") or "activadores_dinamicos_fase3"]
     activadores_loader.main(args)
+"""Prefect flow: carga activadores Fase 3 en DB (usa activadores_loader con env/.env)."""
