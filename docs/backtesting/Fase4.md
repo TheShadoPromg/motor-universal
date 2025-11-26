@@ -51,6 +51,21 @@ Parámetros clave:
   - Tabla `backtest_phase4_summary` (resumen).
   - Tabla `backtest_phase4_summary_details` (detalle diario).
 
+## Fase 4.x - Tuning de hiperparámetros (beta, lambda)
+- CLI: `python -m engine.backtesting.phase4_tune --events-db-url ... --activadores-db-url ...`
+- Splits por defecto:
+  - Train = P1+P2 (2011-10-19 a 2018-12-31)
+  - Valid = P3 (2019-01-01 a 2022-12-31)
+  - Test  = P4 (2023-01-01 a fin de datos)
+- Grid por defecto:
+  - beta: 0.5, 1.0, 1.5, 2.0
+  - lambda: 0.5, 0.7, 0.85, 1.0
+- Selección: mejor combinación en Valid (por modelo) con filtros mínimos y score compuesto; evalúa Train/Valid/Test con esos hiperparámetros.
+- Salidas en `data/backtesting/`:
+  - `phase4_grid_valid.parquet|csv` (todas las combinaciones)
+  - `best_phase4_params.parquet|csv` (ganadores por modelo)
+  - `phase4_results_final.parquet|csv` (Train/Valid/Test con hiperparámetros óptimos)
+
 ## Consideraciones metodológicas
 - No hay look-ahead: cada día usa solo lags definidos en los activadores.
 - Si ningún activador aplica en un día, el modelo recurre a uniforme (o mezcla si `lambda<1`).

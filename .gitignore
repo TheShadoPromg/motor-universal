@@ -36,3 +36,6 @@ data/audit/estructural_fase2_5/sesgos_fase2_5_resumen.csv
 data/outputs/phase4_grid.txt
 data/outputs/phase4/phase4_details.csv
 data/outputs/phase4/phase4_summary.csv
+data/backtesting/best_phase4_params.csv
+data/backtesting/phase4_grid_valid.csv
+data/backtesting/phase4_results_final.csv
