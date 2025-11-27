@@ -37,6 +37,8 @@ MODEL_UNIFORM = "A_uniforme"
 MODEL_CORE = "B_core"
 MODEL_FULL = "C_core_periodico"
 MODEL_MIX = "D_mezcla"
+MODEL_HAZARD = "H_hazard"
+MODEL_HAZARD_STRUCT = "H_hazard_struct"
 
 
 @dataclass(frozen=True)
@@ -61,10 +63,30 @@ def _read_events(db_url: Optional[str], csv_path: Path) -> pd.DataFrame:
         except ImportError as exc:
             raise SystemExit("sqlalchemy requerido para leer eventos desde DB.") from exc
         engine = create_engine(db_url)
-        return pd.read_sql("SELECT fecha, posicion, numero FROM eventos_numericos", engine)
-    if not csv_path.exists():
-        raise FileNotFoundError(f"No se encontró el CSV de eventos en {csv_path}")
-    return pd.read_csv(csv_path)
+        df = pd.read_sql("SELECT fecha, posicion, numero FROM eventos_numericos", engine)
+    else:
+        if not csv_path.exists():
+            raise FileNotFoundError(f"No se encontró el CSV de eventos en {csv_path}")
+        if csv_path.suffix.lower() == ".parquet":
+            df = pd.read_parquet(csv_path)
+        else:
+            df = pd.read_csv(csv_path)
+    # Normaliza nombres alternativos
+    rename_map = {}
+    for col in df.columns:
+        token = str(col).strip().lower()
+        if token == "date":
+            rename_map[col] = "fecha"
+        elif token == "position":
+            rename_map[col] = "posicion"
+        elif token == "number":
+            rename_map[col] = "numero"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+    missing = [c for c in ["fecha", "posicion", "numero"] if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas requeridas en eventos: {missing}")
+    return df
 
 
 def _read_activadores(db_url: Optional[str], path: Path) -> pd.DataFrame:
@@ -199,6 +221,159 @@ def _compute_prob_struct(
             base = mix_lambda * base + (1 - mix_lambda) * uniform
         probs[current] = base
     return probs
+
+
+def _compute_prob_hazard(
+    hazard_df: pd.DataFrame,
+    draw_index: Dict[date, List[Tuple[int, int]]],
+    eval_dates: Sequence[date],
+    beta: float,
+    mix_lambda: float = 1.0,
+) -> Dict[date, np.ndarray]:
+    """Calcula probabilidades basadas en recencia/hazard usando activadores_hazard_para_motor."""
+    # Esperamos columnas: NumeroObjetivo, RecenciaBin, Peso_Normalizado, TipoPatron
+    if hazard_df.empty:
+        return _compute_uniform(eval_dates)
+    hazard_df = hazard_df.copy()
+    # Preparar bins -> pesos por numero objetivo (usa propio numero, tanto global como específico)
+    weights: Dict[str, Dict[int, float]] = {}
+    for _, row in hazard_df.iterrows():
+        bin_label = str(row["RecenciaBin"])
+        num_obj = int(str(row["NumeroObjetivo"]).zfill(2))
+        w = float(row["Peso_Normalizado"])
+        weights.setdefault(bin_label, {}).setdefault(num_obj, 0.0)
+        weights[bin_label][num_obj] += w
+
+    bin_ranges: List[Tuple[str, int, int]] = []
+    for bin_label in hazard_df["RecenciaBin"].unique():
+        try:
+            lo, hi = bin_label.split("-")
+            lo_v = int(lo)
+            hi_v = 10**9 if hi == "MAX" else int(hi)
+            bin_ranges.append((bin_label, lo_v, hi_v))
+        except Exception:
+            continue
+    bin_ranges.sort(key=lambda x: x[1])
+
+    def bin_recencia(r: int) -> str:
+        for label, lo, hi in bin_ranges:
+            if lo <= r <= hi:
+                return label
+        return ""
+
+    prob_map: Dict[date, np.ndarray] = {}
+    all_dates = sorted(draw_index.keys())
+    idx_map = {d: i for i, d in enumerate(all_dates)}
+    numbers = list(range(100))
+    last_seen = {n: None for n in numbers}
+
+    for d in all_dates:
+        idx = idx_map[d]
+        scores = np.zeros(100, dtype=float)
+        for n in numbers:
+            ls = last_seen[n]
+            if ls is None:
+                continue
+            rec = idx - ls
+            bin_id = bin_recencia(rec)
+            if bin_id and bin_id in weights:
+                w = weights[bin_id].get(n)
+                if w:
+                    scores[n] += w
+        if scores.sum() == 0:
+            base = np.full(100, 1 / 100)
+        else:
+            base = _softmax(scores, beta)
+        if mix_lambda < 1.0:
+            uniform = np.full(100, 1 / 100)
+            base = mix_lambda * base + (1 - mix_lambda) * uniform
+        prob_map[d] = base
+
+        drawn = {num for num, _ in draw_index[d]}
+        for num in drawn:
+            last_seen[num] = idx
+
+    return {d: prob_map[d] for d in eval_dates if d in prob_map}
+
+
+def _compute_prob_combined_struct_hazard(
+    acts_struct: Sequence[Activador],
+    hazard_df: pd.DataFrame,
+    draw_index: Dict[date, List[Tuple[int, int]]],
+    eval_dates: Sequence[date],
+    beta_struct: float,
+    beta_hazard: float,
+    mix_lambda: float,
+) -> Dict[date, np.ndarray]:
+    """Combina scores estructurales y de hazard antes de softmax."""
+    hazard_df = hazard_df.copy()
+    weights: Dict[str, Dict[int, float]] = {}
+    for _, row in hazard_df.iterrows():
+        bin_label = str(row["RecenciaBin"])
+        num_obj = int(str(row["NumeroObjetivo"]).zfill(2))
+        w = float(row["Peso_Normalizado"])
+        weights.setdefault(bin_label, {}).setdefault(num_obj, 0.0)
+        weights[bin_label][num_obj] += w
+    bin_ranges: List[Tuple[str, int, int]] = []
+    for bin_label in hazard_df["RecenciaBin"].unique():
+        try:
+            lo, hi = bin_label.split("-")
+            lo_v = int(lo)
+            hi_v = 10**9 if hi == "MAX" else int(hi)
+            bin_ranges.append((bin_label, lo_v, hi_v))
+        except Exception:
+            continue
+    bin_ranges.sort(key=lambda x: x[1])
+
+    def bin_recencia(r: int) -> str:
+        for label, lo, hi in bin_ranges:
+            if lo <= r <= hi:
+                return label
+        return ""
+
+    numbers = list(range(100))
+    all_dates = sorted(draw_index.keys())
+    idx_map = {d: i for i, d in enumerate(all_dates)}
+    last_seen = {n: None for n in numbers}
+    prob_map: Dict[date, np.ndarray] = {}
+
+    # cache struct scores
+    acts_by_date: Dict[date, np.ndarray] = _compute_prob_struct(
+        acts_struct, draw_index, eval_dates, beta=beta_struct, mix_lambda=1.0
+    )
+    struct_scores_raw: Dict[date, np.ndarray] = {}
+    for d, probs in acts_by_date.items():
+        # invert softmax to get scores up to a scale: score = log(prob)
+        with np.errstate(divide="ignore"):
+            struct_scores_raw[d] = np.log(probs + 1e-12)
+
+    for d in all_dates:
+        idx = idx_map[d]
+        scores_h = np.zeros(100, dtype=float)
+        for n in numbers:
+            ls = last_seen[n]
+            if ls is None:
+                continue
+            rec = idx - ls
+            bin_id = bin_recencia(rec)
+            if bin_id and bin_id in weights:
+                w = weights[bin_id].get(n)
+                if w:
+                    scores_h[n] += w
+        scores_struct = struct_scores_raw.get(d, np.zeros(100, dtype=float))
+        scores = scores_struct * beta_struct + scores_h * beta_hazard
+        if scores.sum() == 0:
+            base = np.full(100, 1 / 100)
+        else:
+            base = _softmax(scores, 1.0)
+        if mix_lambda < 1.0:
+            uniform = np.full(100, 1 / 100)
+            base = mix_lambda * base + (1 - mix_lambda) * uniform
+        prob_map[d] = base
+        drawn = {num for num, _ in draw_index[d]}
+        for num in drawn:
+            last_seen[num] = idx
+    return {d: prob_map[d] for d in eval_dates if d in prob_map}
 
 
 def _compute_uniform(eval_dates: Sequence[date]) -> Dict[date, np.ndarray]:
@@ -353,11 +528,16 @@ def run_phase4(
     events_path: Path,
     activ_db_url: Optional[str],
     activ_path: Path,
+    hazard_path: Optional[Path],
     ks: Sequence[int],
     beta_core: float,
     beta_full: float,
+    beta_hazard: float,
+    beta_hazard_struct: float,
     lambda_core: float,
     lambda_full: float,
+    lambda_hazard: float,
+    lambda_hazard_struct: float,
     periods: Optional[List[Tuple[str, str, str]]],
     include_brier: bool,
     grid_beta: Optional[Sequence[float]] = None,
@@ -379,11 +559,16 @@ def run_phase4(
     # Grids de hiperparámetros (si no se dan, usar valores únicos)
     beta_core_grid = grid_beta if grid_beta else [beta_core]
     beta_full_grid = grid_beta if grid_beta else [beta_full]
+    beta_hazard_grid = grid_beta if grid_beta else [beta_hazard]
+    beta_hazard_struct_grid = grid_beta if grid_beta else [beta_hazard_struct]
     lambda_core_grid = grid_lambda if grid_lambda else [lambda_core]
     lambda_full_grid = grid_lambda if grid_lambda else [lambda_full]
+    lambda_hazard_grid = grid_lambda if grid_lambda else [lambda_hazard]
+    lambda_hazard_struct_grid = grid_lambda if grid_lambda else [lambda_hazard_struct]
 
     segments = _segment_periods(draw_index, periods)
     ks_sorted = sorted(set(int(k) for k in ks))
+    hazard_df = pd.read_parquet(hazard_path) if hazard_path and hazard_path.exists() else pd.DataFrame()
 
     all_rows: List[Dict[str, object]] = []
     all_details: List[Dict[str, object]] = []
@@ -426,6 +611,50 @@ def run_phase4(
         rows.append(_summarize(label, MODEL_UNIFORM, m_uniform, ks_sorted, baseline=m_uniform, beta_used=None, lambda_used=None))
         rows.append(_summarize(label, MODEL_CORE, m_core, ks_sorted, baseline=m_uniform, beta_used=beta_core_best, lambda_used=lambda_core_best))
         rows.append(_summarize(label, MODEL_FULL, m_full, ks_sorted, baseline=m_uniform, beta_used=beta_full_best, lambda_used=lambda_full_best))
+        if not hazard_df.empty:
+            best_hazard = None
+            for b in beta_hazard_grid:
+                for lmb in lambda_hazard_grid:
+                    probs_h = _compute_prob_hazard(hazard_df, draw_index, dates, beta=b, mix_lambda=lmb)
+                    m_h_tmp = evaluate_model(probs_h, draw_index, dates, ks_sorted, include_brier=include_brier)
+                    if best_hazard is None or m_h_tmp.log_loss < best_hazard[2].log_loss:
+                        best_hazard = (b, lmb, m_h_tmp)
+            if best_hazard:
+                beta_h_best, lambda_h_best, m_hazard = best_hazard
+                rows.append(
+                    _summarize(
+                        label,
+                        MODEL_HAZARD,
+                        m_hazard,
+                        ks_sorted,
+                        baseline=m_uniform,
+                        beta_used=beta_h_best,
+                        lambda_used=lambda_h_best,
+                    )
+                )
+            # Modelo hazard+estructural (usa acts_full + hazard)
+            best_hs = None
+            for b in beta_hazard_struct_grid:
+                for lmb in lambda_hazard_struct_grid:
+                    probs_hs = _compute_prob_combined_struct_hazard(
+                        acts_full, hazard_df, draw_index, dates, beta_struct=beta_full_best, beta_hazard=b, mix_lambda=lmb
+                    )
+                    m_hs_tmp = evaluate_model(probs_hs, draw_index, dates, ks_sorted, include_brier=include_brier)
+                    if best_hs is None or m_hs_tmp.log_loss < best_hs[2].log_loss:
+                        best_hs = (b, lmb, m_hs_tmp)
+            if best_hs:
+                beta_hs_best, lambda_hs_best, m_hs = best_hs
+                rows.append(
+                    _summarize(
+                        label,
+                        MODEL_HAZARD_STRUCT,
+                        m_hs,
+                        ks_sorted,
+                        baseline=m_uniform,
+                        beta_used=beta_hs_best,
+                        lambda_used=lambda_hs_best,
+                    )
+                )
         df = pd.DataFrame(rows)
         print(f"\n=== Resumen periodo: {label} ===")
         print(df.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
@@ -501,12 +730,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Parquet/CSV de activadores si no se usa DB.",
     )
     parser.add_argument(
+        "--hazard-path",
+        default=None,
+        help="Parquet/CSV de activadores de hazard (opcional, si se quiere evaluar modelo hazard).",
+    )
+    parser.add_argument(
         "--ks",
         default="5,10,15,20",
         help="Lista de K para Hit@K, separada por comas.",
     )
     parser.add_argument("--beta-core", type=float, default=1.0, help="Temperatura beta para modelo core.")
     parser.add_argument("--beta-full", type=float, default=1.0, help="Temperatura beta para modelo full.")
+    parser.add_argument("--beta-hazard", type=float, default=1.0, help="Temperatura beta para modelo hazard.")
+    parser.add_argument("--beta-hazard-struct", type=float, default=1.0, help="Temperatura beta para modelo hazard+struct.")
     parser.add_argument(
         "--lambda-core",
         type=float,
@@ -518,6 +754,18 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Peso de mezcla con uniforme para modelo full (1.0 = no mezcla).",
+    )
+    parser.add_argument(
+        "--lambda-hazard",
+        type=float,
+        default=1.0,
+        help="Peso de mezcla con uniforme para modelo hazard (1.0 = no mezcla).",
+    )
+    parser.add_argument(
+        "--lambda-hazard-struct",
+        type=float,
+        default=1.0,
+        help="Peso de mezcla con uniforme para modelo hazard+struct (1.0 = no mezcla).",
     )
     parser.add_argument(
         "--period",
@@ -573,11 +821,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         events_path=Path(args.events_path),
         activ_db_url=args.activadores_db_url,
         activ_path=Path(args.activadores_path),
+        hazard_path=Path(args.hazard_path) if args.hazard_path else None,
         ks=ks,
         beta_core=args.beta_core,
         beta_full=args.beta_full,
+        beta_hazard=args.beta_hazard,
+        beta_hazard_struct=args.beta_hazard_struct,
         lambda_core=args.lambda_core,
         lambda_full=args.lambda_full,
+        lambda_hazard=args.lambda_hazard,
+        lambda_hazard_struct=args.lambda_hazard_struct,
         periods=args.period,
         include_brier=args.include_brier,
         grid_beta=grid_beta,

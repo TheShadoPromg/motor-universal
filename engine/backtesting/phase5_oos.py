@@ -17,6 +17,7 @@ from typing import Optional, Sequence
 import pandas as pd
 
 from engine.audit import estructural, estructural_fase2_5, estructural_fase3_activadores
+from engine.audit import hazard_recencia, hazard_activadores
 from engine.backtesting.phase4_tune import run_tuning
 
 LOGGER = logging.getLogger("backtesting.phase5_oos")
@@ -47,12 +48,30 @@ def _read_events(db_url: Optional[str], path: Path) -> pd.DataFrame:
         except ImportError as exc:
             raise SystemExit("sqlalchemy requerido para leer eventos desde DB.") from exc
         engine = create_engine(db_url)
-        return pd.read_sql("SELECT fecha, posicion, numero FROM eventos_numericos", engine)
+        df = pd.read_sql("SELECT fecha, posicion, numero FROM eventos_numericos", engine)
     if not path.exists():
         raise FileNotFoundError(f"No se encontró eventos en {path}")
-    if path.suffix.lower() == ".parquet":
-        return pd.read_parquet(path)
-    return pd.read_csv(path)
+    if db_url is None:
+        if path.suffix.lower() == ".parquet":
+            df = pd.read_parquet(path)
+        else:
+            df = pd.read_csv(path)
+    # Normalizar columnas alternativas
+    rename_map = {}
+    for col in df.columns:
+        token = str(col).strip().lower()
+        if token == "date":
+            rename_map[col] = "fecha"
+        elif token == "position":
+            rename_map[col] = "posicion"
+        elif token == "number":
+            rename_map[col] = "numero"
+    if rename_map:
+        df = df.rename(columns=rename_map)
+    missing = [c for c in ["fecha", "posicion", "numero"] if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas requeridas en eventos: {missing}")
+    return df
 
 
 def _parse_date(raw: Optional[str], fallback: date) -> date:
@@ -87,6 +106,7 @@ def run_phase5(
     inputs_dir = window_dir / "inputs"
     audit_dir = window_dir / "audit"
     activ_dir = window_dir / "activadores"
+    hazard_dir = audit_dir / "hazard_train"
     bt_dir = window_dir  # se reutiliza para outputs de tuning
     inputs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -159,12 +179,46 @@ def run_phase5(
     if not activ_para_motor.exists():
         raise FileNotFoundError("No se encontró activadores_dinamicos_fase3_para_motor en salida de Fase 3.")
 
+    # 5) Fase 2.H (hazard/recencia) con Train
+    _run_main(
+        hazard_recencia.main,
+        [
+            "--input",
+            str(train_path_csv),
+            "--output-dir",
+            str(hazard_dir),
+            "--start-date",
+            train_start.isoformat(),
+            "--end-date",
+            train_end.isoformat(),
+        ],
+        "Fase 2.H (hazard)",
+    )
+    # 6) Fase 3.H (activadores hazard)
+    hazard_act_dir = activ_dir / "hazard"
+    _run_main(
+        hazard_activadores.main,
+        [
+            "--input-dir",
+            str(hazard_dir),
+            "--output-dir",
+            str(hazard_act_dir),
+            "--format",
+            "parquet",
+        ],
+        "Fase 3.H (activadores hazard)",
+    )
+    hazard_para_motor = hazard_act_dir / "activadores_hazard_para_motor.parquet"
+    if not hazard_para_motor.exists():
+        hazard_para_motor = hazard_act_dir / "activadores_hazard_para_motor.csv"
+
     # 5) Tuning y evaluación OOS con activadores entrenados
     run_tuning(
         events_db_url=events_db_url,
         events_path=events_path,
         activ_db_url=None,  # usamos el archivo entrenado
         activ_path=activ_para_motor,
+        hazard_path=hazard_para_motor,
         ks=ks,
         beta_grid=beta_grid,
         lambda_grid=lambda_grid,

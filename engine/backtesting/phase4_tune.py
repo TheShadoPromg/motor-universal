@@ -1,8 +1,9 @@
 """Fase 4.x - Tuning de hiperparámetros (beta, lambda) del evaluador histórico.
 
 Objetivo:
-- Definir splits temporales Train/Valid/Test.
-- Explorar un grid de beta/lambda para modelos B (core) y C (core+periódico).
+- Definir splits temporales Train/Valid/Test (sin fuga hacia el futuro).
+- Explorar un grid de beta/lambda para modelos B (core), C (core+periódico),
+  H (solo hazard/recencia) y HS (hazard + estructural).
 - Seleccionar la mejor combinación en Valid con criterios formales.
 - Evaluar en Test (y opcionalmente Train/Valid con los hiperparámetros fijos).
 - Persistir resultados completos (sin truncar) en Parquet y CSV.
@@ -15,16 +16,19 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-import numpy as np
 import pandas as pd
 
 # Reutilizamos utilidades del evaluador Fase 4
 from engine.backtesting.phase4 import (
     MODEL_CORE,
     MODEL_FULL,
+    MODEL_HAZARD,
+    MODEL_HAZARD_STRUCT,
     MODEL_UNIFORM,
     _build_draws_index,
     _compute_prob_struct,
+    _compute_prob_hazard,
+    _compute_prob_combined_struct_hazard,
     _compute_uniform,
     _read_activadores,
     _read_events,
@@ -39,6 +43,7 @@ DEFAULT_EVENTS_PATH = REPO_ROOT / "data" / "raw" / "eventos_numericos.csv"
 DEFAULT_ACTIVADORES_PATH = (
     REPO_ROOT / "data" / "activadores" / "activadores_dinamicos_fase3_para_motor.parquet"
 )
+DEFAULT_HAZARD_PATH = REPO_ROOT / "data" / "activadores" / "activadores_hazard_para_motor.parquet"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "backtesting"
 
 # Periodos base
@@ -78,6 +83,7 @@ def _metrics_to_row(
     beta: Optional[float],
     lambda_mix: Optional[float],
     baseline_metrics,
+    extra_params: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
     row: Dict[str, object] = {
         "WindowId": window_id,
@@ -87,6 +93,8 @@ def _metrics_to_row(
         "StartDate": start,
         "EndDate": end,
     }
+    if extra_params:
+        row.update(extra_params)
     for k in ks:
         row[f"HR@{k}"] = metrics.hit_rates.get(k, 0.0)
     row["RankPromedio"] = metrics.rank_promedio
@@ -107,32 +115,62 @@ def evaluate_model_on_range(
     draw_index: Dict[date, List[Tuple[int, int]]],
     acts_core,
     acts_full,
+    hazard_df: pd.DataFrame,
     beta: Optional[float],
     lambda_mix: Optional[float],
+    beta_struct: Optional[float],
     ks: Sequence[int],
     include_brier: bool,
     window_id: int,
+    baseline_metrics=None,
 ) -> Dict[str, object]:
     if not dates:
         raise ValueError("No hay fechas disponibles en el rango solicitado.")
-    # Baseline uniforme para el mismo rango
-    probs_uniform = _compute_uniform(dates)
-    m_uniform = evaluate_model(probs_uniform, draw_index, dates, ks, include_brier=include_brier)
+    # Baseline uniforme para el mismo rango (reutilizamos si nos lo pasan)
+    m_uniform = (
+        baseline_metrics
+        if baseline_metrics is not None
+        else evaluate_model(_compute_uniform(dates), draw_index, dates, ks, include_brier=include_brier)
+    )
 
     if model_name == MODEL_UNIFORM:
         metrics = m_uniform
         beta_used = None
         lambda_used = None
+        extra: Dict[str, object] = {}
     elif model_name == MODEL_CORE:
         probs = _compute_prob_struct(acts_core, draw_index, dates, beta=beta or 1.0, mix_lambda=lambda_mix or 1.0)
         metrics = evaluate_model(probs, draw_index, dates, ks, include_brier=include_brier)
         beta_used = beta
         lambda_used = lambda_mix
+        extra = {}
     elif model_name == MODEL_FULL:
         probs = _compute_prob_struct(acts_full, draw_index, dates, beta=beta or 1.0, mix_lambda=lambda_mix or 1.0)
         metrics = evaluate_model(probs, draw_index, dates, ks, include_brier=include_brier)
         beta_used = beta
         lambda_used = lambda_mix
+        extra = {}
+    elif model_name == MODEL_HAZARD:
+        probs = _compute_prob_hazard(hazard_df, draw_index, dates, beta=beta or 1.0, mix_lambda=lambda_mix or 1.0)
+        metrics = evaluate_model(probs, draw_index, dates, ks, include_brier=include_brier)
+        beta_used = beta
+        lambda_used = lambda_mix
+        extra = {}
+    elif model_name == MODEL_HAZARD_STRUCT:
+        beta_struct_used = beta_struct if beta_struct is not None else (beta or 1.0)
+        probs = _compute_prob_combined_struct_hazard(
+            acts_full,
+            hazard_df,
+            draw_index,
+            dates,
+            beta_struct=beta_struct_used,
+            beta_hazard=beta or 1.0,
+            mix_lambda=lambda_mix or 1.0,
+        )
+        metrics = evaluate_model(probs, draw_index, dates, ks, include_brier=include_brier)
+        beta_used = beta
+        lambda_used = lambda_mix
+        extra = {"BetaStruct": beta_struct_used}
     else:
         raise ValueError(f"Modelo no soportado: {model_name}")
 
@@ -146,6 +184,7 @@ def evaluate_model_on_range(
         beta=beta_used,
         lambda_mix=lambda_used,
         baseline_metrics=m_uniform,
+        extra_params=extra,
     )
 
 
@@ -165,8 +204,10 @@ def _eval_fixed(
     draw_index,
     acts_core,
     acts_full,
+    hazard_df: pd.DataFrame,
     beta: Optional[float],
     lambda_mix: Optional[float],
+    beta_struct: Optional[float],
     ks: Sequence[int],
     include_brier: bool,
     window_id: int,
@@ -177,8 +218,10 @@ def _eval_fixed(
         draw_index=draw_index,
         acts_core=acts_core,
         acts_full=acts_full,
+        hazard_df=hazard_df,
         beta=beta,
         lambda_mix=lambda_mix,
+        beta_struct=beta_struct,
         ks=ks,
         include_brier=include_brier,
         window_id=window_id,
@@ -225,9 +268,9 @@ def _select_best(df: pd.DataFrame, model: str, strict: bool = True) -> pd.Series
     if subset.empty:
         raise ValueError(f"No hay filas para el modelo {model} en valid.")
     # Filtros mínimos
-    if model == MODEL_FULL and strict:
+    if model in {MODEL_FULL, MODEL_HAZARD_STRUCT} and strict:
         subset = subset[(subset["Lift_HR10"] >= 1.10) & (subset["Delta_LogLoss"] <= 0.01)]
-    elif model == MODEL_CORE and strict:
+    elif model in {MODEL_CORE, MODEL_HAZARD} and strict:
         subset = subset[(subset["Lift_HR10"] >= 1.05) & (subset["Delta_LogLoss"] <= 0.02)]
     if subset.empty:
         # Fallback: tomar mejor por HR@10 si los filtros vacían todo
@@ -255,6 +298,7 @@ def run_tuning(
     events_path: Path,
     activ_db_url: Optional[str],
     activ_path: Path,
+    hazard_path: Optional[Path],
     ks: Sequence[int],
     beta_grid: Sequence[float],
     lambda_grid: Sequence[float],
@@ -268,8 +312,10 @@ def run_tuning(
     test_end: date,
     output_dir: Path,
 ) -> None:
+    """Orquesta el tuning completo (grid en Valid, selección y evaluación final) para todos los modelos."""
     events = _read_events(events_db_url, events_path)
     activ_df = _read_activadores(activ_db_url, activ_path)
+    hazard_df = pd.read_parquet(hazard_path) if hazard_path and hazard_path.exists() else pd.DataFrame()
     draw_index = _build_draws_index(events)
     max_data_date = max(draw_index.keys()) if draw_index else date.max
     activadores = parse_activadores(activ_df)
@@ -285,20 +331,81 @@ def run_tuning(
     valid_dates = dates_for_range(valid_start, min(valid_end, max_data_date))
     test_dates = dates_for_range(test_start, min(test_end, max_data_date))
 
-    # Grid en Valid
+    # Grid en Valid (no truncar combinaciones)
     grid_rows: List[Dict[str, object]] = []
+    baseline_valid = evaluate_model(_compute_uniform(valid_dates), draw_index, valid_dates, ks, include_brier=include_brier)
     for b in beta_grid:
         for lmb in lambda_grid:
-            # Modelo B
-            row_b = evaluate_model_on_range(
-                MODEL_CORE, valid_dates, draw_index, acts_core, acts_full, b, lmb, ks, include_brier, window_id
+            grid_rows.append(
+                evaluate_model_on_range(
+                    MODEL_CORE,
+                    valid_dates,
+                    draw_index,
+                    acts_core,
+                    acts_full,
+                    hazard_df,
+                    b,
+                    lmb,
+                    None,
+                    ks,
+                    include_brier,
+                    window_id,
+                    baseline_metrics=baseline_valid,
+                )
             )
-            grid_rows.append(row_b)
-            # Modelo C
-            row_c = evaluate_model_on_range(
-                MODEL_FULL, valid_dates, draw_index, acts_core, acts_full, b, lmb, ks, include_brier, window_id
+            grid_rows.append(
+                evaluate_model_on_range(
+                    MODEL_FULL,
+                    valid_dates,
+                    draw_index,
+                    acts_core,
+                    acts_full,
+                    hazard_df,
+                    b,
+                    lmb,
+                    None,
+                    ks,
+                    include_brier,
+                    window_id,
+                    baseline_metrics=baseline_valid,
+                )
             )
-            grid_rows.append(row_c)
+            if not hazard_df.empty:
+                grid_rows.append(
+                    evaluate_model_on_range(
+                        MODEL_HAZARD,
+                        valid_dates,
+                        draw_index,
+                        acts_core,
+                        acts_full,
+                        hazard_df,
+                        b,
+                        lmb,
+                        None,
+                        ks,
+                        include_brier,
+                        window_id,
+                        baseline_metrics=baseline_valid,
+                    )
+                )
+                for b_struct in beta_grid:
+                    grid_rows.append(
+                        evaluate_model_on_range(
+                            MODEL_HAZARD_STRUCT,
+                            valid_dates,
+                            draw_index,
+                            acts_core,
+                            acts_full,
+                            hazard_df,
+                            b,
+                            lmb,
+                            b_struct,
+                            ks,
+                            include_brier,
+                            window_id,
+                            baseline_metrics=baseline_valid,
+                        )
+                    )
     grid_df = pd.DataFrame(grid_rows)
 
     # Guardar grid Valid
@@ -306,67 +413,153 @@ def run_tuning(
     grid_path_csv = output_dir / "phase4_grid_valid.csv"
     _append_or_create(grid_path_parquet, grid_path_csv, grid_df)
 
-    # Selección de mejores
+    # Selección de mejores por modelo disponible
+    best_rows: List[pd.Series] = []
     best_b = _select_best(grid_df, MODEL_CORE)
     best_c = _select_best(grid_df, MODEL_FULL)
-    best_df = pd.DataFrame([best_b, best_c])
+    best_rows.extend([best_b, best_c])
+    best_h = None
+    best_hs = None
+    if not hazard_df.empty and MODEL_HAZARD in grid_df["Model"].unique():
+        best_h = _select_best(grid_df, MODEL_HAZARD)
+        best_rows.append(best_h)
+    if not hazard_df.empty and MODEL_HAZARD_STRUCT in grid_df["Model"].unique():
+        best_hs = _select_best(grid_df, MODEL_HAZARD_STRUCT)
+        best_rows.append(best_hs)
+    best_df = pd.DataFrame(best_rows)
     _append_or_create(output_dir / "best_phase4_params.parquet", output_dir / "best_phase4_params.csv", best_df)
 
     # Evaluación final en Train/Valid/Test con hiperparámetros óptimos
     final_rows: List[Dict[str, object]] = []
-    for split_name, dates in [
-        ("TRAIN", train_dates),
-        ("VALID", valid_dates),
-        ("TEST", test_dates),
+    baseline_train = evaluate_model(_compute_uniform(train_dates), draw_index, train_dates, ks, include_brier=include_brier)
+    baseline_valid_full = evaluate_model(_compute_uniform(valid_dates), draw_index, valid_dates, ks, include_brier=include_brier)
+    baseline_test = evaluate_model(_compute_uniform(test_dates), draw_index, test_dates, ks, include_brier=include_brier)
+    for split_name, dates, baseline_metrics in [
+        ("TRAIN", train_dates, baseline_train),
+        ("VALID", valid_dates, baseline_valid_full),
+        ("TEST", test_dates, baseline_test),
     ]:
-        # Uniforme
         row_u = evaluate_model_on_range(
-            MODEL_UNIFORM, dates, draw_index, acts_core, acts_full, None, None, ks, include_brier, window_id
+            MODEL_UNIFORM,
+            dates,
+            draw_index,
+            acts_core,
+            acts_full,
+            hazard_df,
+            None,
+            None,
+            None,
+            ks,
+            include_brier,
+            window_id,
+            baseline_metrics=baseline_metrics,
         )
         row_u.update({"Split": split_name})
         final_rows.append(row_u)
-        # Core
+
         row_b = evaluate_model_on_range(
             MODEL_CORE,
             dates,
             draw_index,
             acts_core,
             acts_full,
+            hazard_df,
             float(best_b["Beta"]),
             float(best_b["Lambda"]),
+            None,
             ks,
             include_brier,
             window_id,
+            baseline_metrics=baseline_metrics,
         )
         row_b.update({"Split": split_name})
         final_rows.append(row_b)
-        # Full
+
         row_c = evaluate_model_on_range(
             MODEL_FULL,
             dates,
             draw_index,
             acts_core,
             acts_full,
+            hazard_df,
             float(best_c["Beta"]),
             float(best_c["Lambda"]),
+            None,
             ks,
             include_brier,
             window_id,
+            baseline_metrics=baseline_metrics,
         )
         row_c.update({"Split": split_name})
         final_rows.append(row_c)
 
+        if best_h is not None:
+            row_h = evaluate_model_on_range(
+                MODEL_HAZARD,
+                dates,
+                draw_index,
+                acts_core,
+                acts_full,
+                hazard_df,
+                float(best_h["Beta"]),
+                float(best_h["Lambda"]),
+                None,
+                ks,
+                include_brier,
+                window_id,
+                baseline_metrics=baseline_metrics,
+            )
+            row_h.update({"Split": split_name})
+            final_rows.append(row_h)
+
+        if best_hs is not None:
+            beta_struct_val = float(best_hs.get("BetaStruct", best_hs["Beta"]))
+            row_hs = evaluate_model_on_range(
+                MODEL_HAZARD_STRUCT,
+                dates,
+                draw_index,
+                acts_core,
+                acts_full,
+                hazard_df,
+                float(best_hs["Beta"]),
+                float(best_hs["Lambda"]),
+                beta_struct_val,
+                ks,
+                include_brier,
+                window_id,
+                baseline_metrics=baseline_metrics,
+            )
+            row_hs.update({"Split": split_name})
+            final_rows.append(row_hs)
+
     final_df = pd.DataFrame(final_rows)
     _append_or_create(output_dir / "phase4_results_final.parquet", output_dir / "phase4_results_final.csv", final_df)
 
-    # Sensibilidad en Test (pequeñas perturbaciones alrededor de los óptimos)
+    # Sensibilidad en Test (perturbaciones alrededor de los óptimos)
     sens_rows: List[Dict[str, object]] = []
-    for model, best in [(MODEL_CORE, best_b), (MODEL_FULL, best_c)]:
+    sens_models = [(MODEL_CORE, best_b), (MODEL_FULL, best_c)]
+    if best_h is not None:
+        sens_models.append((MODEL_HAZARD, best_h))
+    if best_hs is not None:
+        sens_models.append((MODEL_HAZARD_STRUCT, best_hs))
+    for model, best in sens_models:
         base_b = float(best["Beta"])
         base_l = float(best["Lambda"])
+        beta_struct_base = float(best.get("BetaStruct", base_b))
         for b, lmb, db, dl in _sensitivity_grid(base_b, base_l):
             row = _eval_fixed(
-                model, test_dates, draw_index, acts_core, acts_full, b, lmb, ks, include_brier, window_id
+                model,
+                test_dates,
+                draw_index,
+                acts_core,
+                acts_full,
+                hazard_df,
+                b,
+                lmb,
+                beta_struct_base if model == MODEL_HAZARD_STRUCT else None,
+                ks,
+                include_brier,
+                window_id,
             )
             row.update(
                 {
@@ -392,9 +585,32 @@ def run_tuning(
             (MODEL_UNIFORM, None, None),
             (MODEL_CORE, float(best_b["Beta"]), float(best_b["Lambda"])),
             (MODEL_FULL, float(best_c["Beta"]), float(best_c["Lambda"])),
+            (
+                MODEL_HAZARD,
+                float(best_h["Beta"]) if best_h is not None else None,
+                float(best_h["Lambda"]) if best_h is not None else None,
+            ),
+            (
+                MODEL_HAZARD_STRUCT,
+                float(best_hs["Beta"]) if best_hs is not None else None,
+                float(best_hs["Lambda"]) if best_hs is not None else None,
+            ),
         ]:
+            if model in {MODEL_HAZARD, MODEL_HAZARD_STRUCT} and hazard_df.empty:
+                continue
             row = _eval_fixed(
-                model, seg_dates, draw_index, acts_core, acts_full, beta_val, lambda_val, ks, include_brier, window_id
+                model,
+                seg_dates,
+                draw_index,
+                acts_core,
+                acts_full,
+                hazard_df,
+                beta_val,
+                lambda_val,
+                float(best_hs["BetaStruct"]) if model == MODEL_HAZARD_STRUCT and best_hs is not None else None,
+                ks,
+                include_brier,
+                window_id,
             )
             row.update({"Split": "TEST", "SegmentType": seg_type, "SegmentValue": seg_value})
             seg_rows.append(row)
@@ -415,12 +631,17 @@ def run_tuning(
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fase 4.x: tuning de beta/lambda para modelos core y core+periodico con splits Train/Valid/Test."
+        description="Fase 4.x: tuning de beta/lambda para modelos core, core+periodico, hazard y hazard+struct con splits Train/Valid/Test."
     )
     parser.add_argument("--events-db-url", default=None, help="DSN SQLAlchemy para leer eventos_numericos.")
     parser.add_argument("--events-path", default=str(DEFAULT_EVENTS_PATH), help="CSV de eventos (fallback).")
     parser.add_argument("--activadores-db-url", default=None, help="DSN SQLAlchemy para leer activadores.")
     parser.add_argument("--activadores-path", default=str(DEFAULT_ACTIVADORES_PATH), help="Parquet/CSV de activadores.")
+    parser.add_argument(
+        "--hazard-path",
+        default=str(DEFAULT_HAZARD_PATH),
+        help="Parquet/CSV de activadores de hazard (opcional, se ignora si no existe).",
+    )
     parser.add_argument("--ks", default="5,10,15,20", help="Lista de K para Hit@K.")
     parser.add_argument("--beta-grid", default="0.5,1.0,1.5,2.0", help="Grid de beta (coma separada).")
     parser.add_argument("--lambda-grid", default="0.5,0.7,0.85,1.0", help="Grid de lambda (coma separada).")
@@ -462,6 +683,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         events_path=Path(args.events_path),
         activ_db_url=args.activadores_db_url,
         activ_path=Path(args.activadores_path),
+        hazard_path=Path(args.hazard_path) if args.hazard_path else None,
         ks=ks,
         beta_grid=beta_grid,
         lambda_grid=lambda_grid,

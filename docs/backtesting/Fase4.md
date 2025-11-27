@@ -7,6 +7,8 @@ Objetivo: medir de forma rigurosa el poder predictivo de los activadores Fase 3 
   - A_uniforme: distribución 1/100.
   - B_core: solo `core_global`.
   - C_core_periodico: `core_global + periodico`.
+  - H_hazard: sólo activadores de recencia/hazard (Fase 3.H).
+  - H_hazard_struct: estructural (full) + hazard combinados antes de softmax.
   - Mezcla con uniforme controlada por `lambda`.
 - Métricas: Hit@K (K=5/10/15/20 por defecto), rank promedio de los 3 ganadores, log-loss, Brier opcional, lifts vs uniforme.
 - Sin descubrimiento de reglas; consume activadores ya generados.
@@ -18,12 +20,15 @@ Objetivo: medir de forma rigurosa el poder predictivo de los activadores Fase 3 
   - `numero` (00-99)
 - Activadores Fase 3 (`activadores_dinamicos_fase3_para_motor` en parquet/csv o tabla DB):
   - `NumeroObjetivo`, `NumeroCondicionante`, `Lag`, `Peso_Normalizado`, `Clasificacion_Fase2_5`, `PosOrigen` (ANY o 1/2/3).
+- (Opcional) Activadores hazard (`activadores_hazard_para_motor.parquet|csv`):
+  - `NumeroObjetivo`, `RecenciaBin`, `RecenciaMin`, `RecenciaMax`, `Peso_Normalizado`, `TipoPatron`, `Clasificacion_Hazard`.
 
 ## Uso del CLI
 ```
 python -m engine.backtesting.phase4 \
   --events-db-url postgresql://admin:admin@localhost:5432/motor \  # o --events-path data/raw/eventos_numericos.csv
   --activadores-db-url postgresql://admin:admin@localhost:5432/motor \  # o --activadores-path data/activadores/activadores_dinamicos_fase3_para_motor.parquet
+  --hazard-path data/activadores/activadores_hazard_para_motor.parquet \  # opcional, si quieres evaluar hazard
   --period P1 2011-01-01 2014-12-31 \
   --period P2 2015-01-01 2018-12-31 \
   --period P3 2019-01-01 2022-12-31 \
@@ -38,15 +43,15 @@ python -m engine.backtesting.phase4 \
 ```
 
 Parámetros clave:
-- `--beta-core/--beta-full`: temperatura del softmax (si no se usa grid).
-- `--lambda-core/--lambda-full`: mezcla con uniforme (1.0 = no mezcla).
+- `--beta-core/--beta-full/--beta-hazard/--beta-hazard-struct`: temperatura del softmax (si no se usa grid).
+- `--lambda-core/--lambda-full/--lambda-hazard/--lambda-hazard-struct`: mezcla con uniforme (1.0 = no mezcla).
 - `--grid-beta/--grid-lambda`: listas para grid-search; elige la combinación con menor log-loss por modelo/periodo.
 - `--period LABEL START END`: bloques opcionales; si se omite se usa todo el rango.
 
 ## Salidas
 - Directorio `data/outputs/phase4/`:
-  - `phase4_summary.parquet|csv`: una fila por periodo y modelo con HR@K, lifts, RankPromedio, LogLoss, Brier, Beta, Lambda.
-  - `phase4_details.parquet|csv`: detalle diario por modelo (fecha, hits@K, rank/prom, logloss_sum, brier, prob/rank de los 3 ganadores).
+- `phase4_summary.parquet|csv`: una fila por periodo y modelo con HR@K, lifts, RankPromedio, LogLoss, Brier, Beta, Lambda (incluye H_hazard y H_hazard_struct si se provee `--hazard-path`).
+- `phase4_details.parquet|csv`: detalle diario por modelo (fecha, hits@K, rank/prom, logloss_sum, brier, prob/rank de los 3 ganadores).
 - Base de datos (opcional, si se pasa `--output-db-url`):
   - Tabla `backtest_phase4_summary` (resumen).
   - Tabla `backtest_phase4_summary_details` (detalle diario).
