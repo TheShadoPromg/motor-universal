@@ -618,6 +618,11 @@ def _save_csv(df: pd.DataFrame, path: Path) -> None:
 
 def _save_parquet(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Normaliza tipos problemáticos antes de Parquet (pos_origen/destino pueden ser int/str)
+    if "pos_origen" in df.columns:
+        df["pos_origen"] = df["pos_origen"].astype(str)
+    if "pos_destino" in df.columns:
+        df["pos_destino"] = df["pos_destino"].astype(str)
     df.to_parquet(path, index=False, engine=PARQUET_ENGINE)
 
 

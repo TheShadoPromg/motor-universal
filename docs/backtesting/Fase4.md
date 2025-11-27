@@ -65,6 +65,8 @@ Parámetros clave:
   - `phase4_grid_valid.parquet|csv` (todas las combinaciones)
   - `best_phase4_params.parquet|csv` (ganadores por modelo)
   - `phase4_results_final.parquet|csv` (Train/Valid/Test con hiperparámetros óptimos)
+  - `phase4_sensitivity_test.parquet|csv` (perturbaciones ±beta, ±lambda en Test)
+  - `phase4_results_segments.parquet|csv` (segmentos de Test: mitades y día de semana)
 
 ## Consideraciones metodológicas
 - No hay look-ahead: cada día usa solo lags definidos en los activadores.

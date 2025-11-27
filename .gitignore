@@ -15,6 +15,7 @@ node_modules/
 .DS_Store
 .vscode/
 .idea/
+data/
 data/audit/estructural/estructuras_intradiarias_sumas_resumen.csv
 data/audit/estructural/sesgos_por_dia_semana_resumen.csv
 data/audit/estructural/sesgos_resumen_global_fase2.csv

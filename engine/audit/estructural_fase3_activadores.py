@@ -200,6 +200,23 @@ def build_activadores_df(core_path: Path = DEFAULT_INPUT_CORE, periodos_path: Pa
 
     sesgos_core = _read_table(core_file)
     sesgos_periodos = _read_table(period_file)
+    if sesgos_core.empty:
+        LOGGER.warning("Fase 3: no hay sesgos core/periodicos; se generan activadores vacíos.")
+        motor_cols = [
+            "NumeroObjetivo",
+            "PosOrigen",
+            "PosDestino",
+            "Lag",
+            "NumeroCondicionante",
+            "TipoRelacion",
+            "Clasificacion_Fase2_5",
+            "Peso_Bruto",
+            "Peso_Normalizado",
+            "Regla_Condicional",
+            "Stability_Score",
+            "Periodos_Fuertes",
+        ]
+        return pd.DataFrame(columns=motor_cols)
 
     # Normalizar claves mínimas
     key_cols = ["tipo_relacion", "numero_base", "numero_destino", "pos_origen", "pos_destino", "lag"]

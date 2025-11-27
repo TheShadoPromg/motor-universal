@@ -335,6 +335,56 @@ def run_structural_fase2_5(input_dir: Path, output_dir: Path) -> None:
     LOGGER.info("Cargando tablas de transiciones de Fase 2")
     transiciones = load_transiciones(input_dir)
 
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if sesgos_df.empty:
+        LOGGER.warning("Fase 2.5: sesgos vacíos; se generan salidas vacías.")
+        core_cols = [
+            "tipo_relacion",
+            "numero_base",
+            "numero_destino",
+            "pos_origen",
+            "pos_destino",
+            "lag",
+            "max_delta_rel",
+            "max_z_score",
+            "min_p_value",
+            "n_oportunidades_total",
+            "clasificacion_inicial",
+            "clasificacion_fase2_5",
+            "mean_delta_rel_periods",
+            "stability_score",
+        ]
+        period_cols = [
+            "tipo_relacion",
+            "numero_base",
+            "numero_destino",
+            "pos_origen",
+            "pos_destino",
+            "lag",
+            "periodo",
+            "n_oportunidades_period",
+            "n_exitos_period",
+            "p_empirica_period",
+            "delta_rel_period",
+            "p_value_period",
+            "tiene_datos",
+            "es_fuerte",
+            "es_debil",
+        ]
+        pd.DataFrame(columns=core_cols).to_parquet(
+            output_dir / "sesgos_fase2_5_resumen.parquet", index=False, engine=PARQUET_ENGINE
+        )
+        pd.DataFrame(columns=period_cols).to_parquet(
+            output_dir / "sesgos_fase2_5_por_periodo.parquet", index=False, engine=PARQUET_ENGINE
+        )
+        pd.DataFrame(columns=core_cols).to_parquet(
+            output_dir / "sesgos_fase2_5_core_y_periodicos.parquet", index=False, engine=PARQUET_ENGINE
+        )
+        pd.DataFrame(columns=core_cols).to_csv(output_dir / "sesgos_fase2_5_resumen.csv", index=False)
+        pd.DataFrame(columns=period_cols).to_csv(output_dir / "sesgos_fase2_5_por_periodo.csv", index=False)
+        pd.DataFrame(columns=core_cols).to_csv(output_dir / "sesgos_fase2_5_core_y_periodicos.csv", index=False)
+        return
+
     resumen_rows: List[Dict[str, object]] = []
     period_rows: List[Dict[str, object]] = []
 
@@ -380,7 +430,6 @@ def run_structural_fase2_5(input_dir: Path, output_dir: Path) -> None:
             }
         )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     resumen_df = pd.DataFrame(resumen_rows)
     period_df = pd.DataFrame(period_rows)
 

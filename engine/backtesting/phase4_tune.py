@@ -159,6 +159,67 @@ def _append_or_create(path_parquet: Path, path_csv: Path, df_new: pd.DataFrame) 
         df_new.to_csv(path_csv, index=False)
 
 
+def _eval_fixed(
+    model_name: str,
+    dates: List[date],
+    draw_index,
+    acts_core,
+    acts_full,
+    beta: Optional[float],
+    lambda_mix: Optional[float],
+    ks: Sequence[int],
+    include_brier: bool,
+    window_id: int,
+) -> Dict[str, object]:
+    return evaluate_model_on_range(
+        model_name=model_name,
+        dates=dates,
+        draw_index=draw_index,
+        acts_core=acts_core,
+        acts_full=acts_full,
+        beta=beta,
+        lambda_mix=lambda_mix,
+        ks=ks,
+        include_brier=include_brier,
+        window_id=window_id,
+    )
+
+
+def _split_test_segments(dates: List[date]) -> List[Tuple[str, str, List[date]]]:
+    """Genera segmentos de Test: mitad1/mitad2 y día de semana."""
+    if not dates:
+        return []
+    segments: List[Tuple[str, str, List[date]]] = []
+    # Mitades
+    sorted_dates = sorted(dates)
+    mid_idx = len(sorted_dates) // 2
+    segments.append(("YEAR_BLOCK", "H1", sorted_dates[:mid_idx] or sorted_dates))
+    segments.append(("YEAR_BLOCK", "H2", sorted_dates[mid_idx:] or sorted_dates))
+    # Día de semana
+    dow_map: Dict[int, List[date]] = {}
+    for d in sorted_dates:
+        dow_map.setdefault(d.weekday(), []).append(d)
+    dow_names = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    for dow, lst in dow_map.items():
+        segments.append(("DOW", dow_names[dow], lst))
+    return segments
+
+
+def _sensitivity_grid(beta_base: float, lambda_base: float) -> List[Tuple[float, float, float, float]]:
+    deltas_b = (-0.25, 0.0, 0.25)
+    deltas_l = (-0.1, 0.0, 0.1)
+    combos = []
+    for db in deltas_b:
+        for dl in deltas_l:
+            b = beta_base + db
+            lmb = lambda_base + dl
+            if b <= 0:
+                continue
+            lmb = min(max(lmb, 0.0), 1.0)
+            combos.append((b, lmb, db, dl))
+    return combos
+
+
 def _select_best(df: pd.DataFrame, model: str, strict: bool = True) -> pd.Series:
     subset = df[df["Model"] == model].copy()
     if subset.empty:
@@ -298,7 +359,58 @@ def run_tuning(
     final_df = pd.DataFrame(final_rows)
     _append_or_create(output_dir / "phase4_results_final.parquet", output_dir / "phase4_results_final.csv", final_df)
 
-    LOGGER.info("Tuning completado. Grid valid=%s filas, resultados finales=%s filas.", len(grid_df), len(final_df))
+    # Sensibilidad en Test (pequeñas perturbaciones alrededor de los óptimos)
+    sens_rows: List[Dict[str, object]] = []
+    for model, best in [(MODEL_CORE, best_b), (MODEL_FULL, best_c)]:
+        base_b = float(best["Beta"])
+        base_l = float(best["Lambda"])
+        for b, lmb, db, dl in _sensitivity_grid(base_b, base_l):
+            row = _eval_fixed(
+                model, test_dates, draw_index, acts_core, acts_full, b, lmb, ks, include_brier, window_id
+            )
+            row.update(
+                {
+                    "Split": "TEST",
+                    "Beta_base": base_b,
+                    "Lambda_base": base_l,
+                    "Delta_Beta": db,
+                    "Delta_Lambda": dl,
+                }
+            )
+            sens_rows.append(row)
+    if sens_rows:
+        sens_df = pd.DataFrame(sens_rows)
+        _append_or_create(
+            output_dir / "phase4_sensitivity_test.parquet", output_dir / "phase4_sensitivity_test.csv", sens_df
+        )
+
+    # Segmentación en Test (mitades y día de semana) usando hiperparámetros óptimos
+    seg_rows: List[Dict[str, object]] = []
+    segments = _split_test_segments(test_dates)
+    for seg_type, seg_value, seg_dates in segments:
+        for model, beta_val, lambda_val in [
+            (MODEL_UNIFORM, None, None),
+            (MODEL_CORE, float(best_b["Beta"]), float(best_b["Lambda"])),
+            (MODEL_FULL, float(best_c["Beta"]), float(best_c["Lambda"])),
+        ]:
+            row = _eval_fixed(
+                model, seg_dates, draw_index, acts_core, acts_full, beta_val, lambda_val, ks, include_brier, window_id
+            )
+            row.update({"Split": "TEST", "SegmentType": seg_type, "SegmentValue": seg_value})
+            seg_rows.append(row)
+    if seg_rows:
+        seg_df = pd.DataFrame(seg_rows)
+        _append_or_create(
+            output_dir / "phase4_results_segments.parquet", output_dir / "phase4_results_segments.csv", seg_df
+        )
+
+    LOGGER.info(
+        "Tuning completado. Grid valid=%s filas, resultados finales=%s filas, sensibilidad=%s, segmentos=%s",
+        len(grid_df),
+        len(final_df),
+        len(sens_rows),
+        len(seg_rows),
+    )
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
