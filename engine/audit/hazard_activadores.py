@@ -139,7 +139,8 @@ def run_hazard_activadores(input_dir: Path, output_dir: Path, fmt: str) -> None:
         act_global = act_motor.copy()
         act_num = act_motor.copy()
     else:
-        act_motor = _normalize_pesos(pd.concat([act_global_raw, act_num_raw], ignore_index=True))
+        frames = [df for df in [act_global_raw, act_num_raw] if not df.empty]
+        act_motor = _normalize_pesos(pd.concat(frames, ignore_index=True))
         act_global = act_motor[act_motor["TipoPatron"] == "hazard_global"].copy()
         act_num = act_motor[act_motor["TipoPatron"] == "hazard_numero"].copy()
 

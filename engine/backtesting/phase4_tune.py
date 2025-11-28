@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
+import json
+import time
 
 # Reutilizamos utilidades del evaluador Fase 4
 from engine.backtesting.phase4 import (
@@ -616,9 +618,9 @@ def run_tuning(
             seg_rows.append(row)
     if seg_rows:
         seg_df = pd.DataFrame(seg_rows)
-        _append_or_create(
-            output_dir / "phase4_results_segments.parquet", output_dir / "phase4_results_segments.csv", seg_df
-        )
+    _append_or_create(
+        output_dir / "phase4_results_segments.parquet", output_dir / "phase4_results_segments.csv", seg_df
+    )
 
     LOGGER.info(
         "Tuning completado. Grid valid=%s filas, resultados finales=%s filas, sensibilidad=%s, segmentos=%s",
@@ -627,6 +629,41 @@ def run_tuning(
         len(sens_rows),
         len(seg_rows),
     )
+
+    # Run card con metadatos, grids y mejores hiperparámetros/metricas (TEST)
+    try:
+        card = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "events_path": str(events_path),
+            "activadores_path": str(activ_path),
+            "hazard_path": str(hazard_path) if hazard_path else None,
+            "ks": ks,
+            "beta_grid": beta_grid,
+            "lambda_grid": lambda_grid,
+            "splits": {
+                "train": {"start": train_start.isoformat(), "end": train_end.isoformat()},
+                "valid": {"start": valid_start.isoformat(), "end": valid_end.isoformat()},
+                "test": {"start": test_start.isoformat(), "end": str(test_end)},
+            },
+            "best_params": {
+                "core": best_b,
+                "full": best_c,
+                "hazard": best_h,
+                "hazard_struct": best_hs,
+            },
+            "test_metrics": {},
+        }
+        test_metrics = final_df[final_df["Split"] == "TEST"]
+        for model in [MODEL_UNIFORM, MODEL_CORE, MODEL_FULL, MODEL_HAZARD, MODEL_HAZARD_STRUCT]:
+            mrow = test_metrics[test_metrics["Model"] == model]
+            if not mrow.empty:
+                card["test_metrics"][model] = mrow.iloc[0].to_dict()
+        card_path = output_dir / "phase4_run_card.json"
+        with open(card_path, "w", encoding="utf-8") as fh:
+            json.dump(card, fh, ensure_ascii=False, indent=2, default=str)
+        LOGGER.info("Run card escrito en %s", card_path)
+    except Exception as exc:  # pragma: no cover
+        LOGGER.warning("No se pudo escribir run card: %s", exc)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

@@ -7,7 +7,7 @@ import os
 import shutil
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -50,6 +50,17 @@ def _parse_run_date(raw: Optional[str], available: pd.Series) -> date:
     return datetime.utcnow().date()
 
 
+def _parse_date_range(raw: Optional[str]) -> Optional[Tuple[date, date]]:
+    """Devuelve (start, end) si raw='YYYY-MM-DD:YYYY-MM-DD', si no, None."""
+    if not raw:
+        return None
+    try:
+        start_s, end_s = raw.split(":")
+        return datetime.strptime(start_s, "%Y-%m-%d").date(), datetime.strptime(end_s, "%Y-%m-%d").date()
+    except Exception as exc:
+        raise ValueError(f"Formato de date-range inválido: {raw}") from exc
+
+
 def _parse_weights(raw: Optional[str]) -> tuple[float, float, float]:
     if raw:
         tokens = [t.strip() for t in raw.split(",") if t.strip()]
@@ -65,40 +76,45 @@ def _parse_weights(raw: Optional[str]) -> tuple[float, float, float]:
     return weights  # type: ignore[return-value]
 
 
-def _load_daily_frame(
-    path: Path,
-    run_date: date,
-    dataset_name: str,
-    score_column: str,
-    detail_column: str,
-    cached_df: Optional[pd.DataFrame] = None,
-) -> pd.DataFrame:
-    if cached_df is not None:
-        df = cached_df.copy()
-    else:
-        if not path.exists():
-            raise FileNotFoundError(f"No se encontró el dataset {dataset_name}: {path}")
+def _read_source_df(path: Path, dataset_name: str) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"No se encontró el dataset {dataset_name}: {path}")
     df = pd.read_parquet(path)
     if df.empty:
         raise ValueError(f"El dataset {dataset_name} está vacío ({path}).")
     df = df.copy()
     df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-    mask = df["fecha"] == pd.Timestamp(run_date)
+    df = df.dropna(subset=["fecha"])
+    df["numero"] = df["numero"].astype(str).str.zfill(2)
+    return df
+
+
+def _load_daily_frame(
+    path: Path,
+    target_dates: Sequence[date],
+    dataset_name: str,
+    score_column: str,
+    detail_column: str,
+    cached_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    if not target_dates:
+        return pd.DataFrame(columns=["fecha", "numero", score_column, detail_column])
+    df = cached_df.copy() if cached_df is not None else _read_source_df(path, dataset_name)
+    if df.empty:
+        raise ValueError(f"El dataset {dataset_name} está vacío ({path}).")
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df = df.dropna(subset=["fecha"])
+    df["numero"] = df["numero"].astype(str).str.zfill(2)
+    mask = df["fecha"].dt.date.isin(target_dates)
     daily = df.loc[mask].copy()
     if daily.empty:
-        last_ts = df["fecha"].dropna().max()
-        if pd.isna(last_ts):
-            raise ValueError(f"{dataset_name} no contiene información utilizable (archivo: {path}).")
         LOGGER.warning(
-            "%s no contiene información para %s; se reutiliza %s como base para pronosticar.",
+            "%s no tiene registros para fechas solicitadas: %s",
             dataset_name,
-            run_date,
-            last_ts.date(),
+            ", ".join(sorted({d.isoformat() for d in target_dates})),
         )
-        daily = df.loc[df["fecha"] == last_ts].copy()
-        daily["fecha"] = pd.Timestamp(run_date)
+        return pd.DataFrame(columns=["fecha", "numero", score_column, detail_column])
 
-    daily["numero"] = daily["numero"].astype(str).str.zfill(2)
     columns = ["fecha", "numero", score_column]
     if detail_column in daily.columns:
         columns.append(detail_column)
@@ -106,6 +122,9 @@ def _load_daily_frame(
         daily[detail_column] = "[]"
         columns.append(detail_column)
 
+    missing = [col for col in columns if col not in daily.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas en {dataset_name}: {missing}")
     daily = daily[columns]
     return _ensure_full_grid(daily, score_column, detail_column, dataset_name)
 
@@ -116,23 +135,22 @@ def _ensure_full_grid(
     detail_column: str,
     dataset_name: str,
 ) -> pd.DataFrame:
-    fecha = df["fecha"].iloc[0]
+    if df.empty:
+        LOGGER.warning("Dataset %s quedó vacío tras filtrar fechas; se devuelve dataframe vacío.", dataset_name)
+        return pd.DataFrame(columns=["fecha", "numero", score_column, detail_column])
     numbers = pd.Index([f"{i:02d}" for i in range(100)], name="numero")
-    base = pd.DataFrame({"numero": numbers})
-    merged = base.merge(df.drop(columns="fecha"), on="numero", how="left")
-    merged["fecha"] = fecha
-    merged[score_column] = pd.to_numeric(merged[score_column], errors="coerce").fillna(0.0)
-    merged[detail_column] = merged[detail_column].fillna("[]")
-    missing = merged["numero"][merged[score_column].isna()].tolist()
-    if missing:
-        LOGGER.warning(
-            "%s: se encontraron valores inválidos en %s; fueron reemplazados por 0.",
-            dataset_name,
-            missing,
-        )
-    merged[score_column] = merged[score_column].astype(float)
-    merged["fecha"] = pd.to_datetime(merged["fecha"])
-    return merged.sort_values("numero").reset_index(drop=True)
+    out_frames: List[pd.DataFrame] = []
+    for fecha, grp in df.groupby("fecha"):
+        base = pd.DataFrame({"numero": numbers})
+        merged = base.merge(grp.drop(columns="fecha"), on="numero", how="left")
+        merged["fecha"] = fecha
+        merged[score_column] = pd.to_numeric(merged[score_column], errors="coerce").fillna(0.0)
+        merged[detail_column] = merged[detail_column].fillna("[]")
+        merged[score_column] = merged[score_column].astype(float)
+        out_frames.append(merged)
+    out = pd.concat(out_frames, ignore_index=True)
+    out["fecha"] = pd.to_datetime(out["fecha"])
+    return out.sort_values(["fecha", "numero"]).reset_index(drop=True)
 
 
 def _softmax(values: pd.Series, temperature: float) -> pd.Series:
@@ -178,12 +196,10 @@ def _parse_detail(payload: object) -> List[dict]:
 
 
 def _combine_details(row: pd.Series) -> str:
-    payload = {
-        "cruzado": _parse_detail(row.get("detalle_cruzado")),
-        "estructural": _parse_detail(row.get("detalle_estructural")),
-        "derivado": _parse_detail(row.get("detalle_derivado")),
-    }
-    return json.dumps(payload, ensure_ascii=False)
+    parts = []
+    for key in ["detalle_cruzado", "detalle_estructural", "detalle_derivado"]:
+        parts.extend(_parse_detail(row.get(key)))
+    return json.dumps(parts, ensure_ascii=False)
 
 
 def _build_object_name(prefix: str, run_date: date, filename: str) -> str:
@@ -255,6 +271,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--derived-path", default=str(DEFAULT_DERIVED_PATH), help="Parquet con score_derivado diario.")
     parser.add_argument("--run-date", default=None, help="Fecha (YYYY-MM-DD) a procesar. Por defecto la más reciente.")
     parser.add_argument(
+        "--date-range",
+        default=None,
+        help="Rango batch 'YYYY-MM-DD:YYYY-MM-DD' (si se pasa, ignora run-date y fusiona todas las fechas del rango).",
+    )
+    parser.add_argument(
         "--weights",
         default=",".join(map(str, DEFAULT_WEIGHTS)),
         help="Ponderaciones C,E,D (por ejemplo '0.4,0.3,0.3').",
@@ -287,18 +308,59 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     struct_path = Path(args.struct_path).expanduser().resolve()
     derived_path = Path(args.derived_path).expanduser().resolve()
 
-    derived_df = pd.read_parquet(derived_path)
-    run_date = _parse_run_date(args.run_date, pd.to_datetime(derived_df["fecha"]))
+    cross_df = _read_source_df(cross_path, "cross_daily")
+    struct_df = _read_source_df(struct_path, "struct_daily")
+    derived_df = _read_source_df(derived_path, "derived_daily")
 
-    LOGGER.info("Procesando fecha %s con weights=%s ...", run_date, weights)
-    cross = _load_daily_frame(cross_path, run_date, "cross_daily", "score_cruzado", "detalle_cruzado")
-    structural = _load_daily_frame(struct_path, run_date, "struct_daily", "score_estructural", "detalle_estructural")
-    derived = _load_daily_frame(
-        derived_path, run_date, "derived_daily", "score_derivado", "detalle_derivado", cached_df=derived_df
+    cross_dates = set(cross_df["fecha"].dt.date)
+    struct_dates = set(struct_df["fecha"].dt.date)
+    derived_dates = set(derived_df["fecha"].dt.date)
+    available_dates = sorted(cross_dates & struct_dates & derived_dates)
+    if not available_dates:
+        LOGGER.error("No hay intersección de fechas entre cross/struct/derived.")
+        return 2
+
+    date_range = _parse_date_range(args.date_range)
+    if date_range:
+        start_date, end_date = date_range
+        target_dates = [d for d in available_dates if start_date <= d <= end_date]
+        if not target_dates:
+            LOGGER.error("No hay fechas comunes en el rango %s:%s.", start_date, end_date)
+            return 2
+    else:
+        run_date = _parse_run_date(args.run_date, pd.Series(available_dates))
+        if run_date not in available_dates:
+            LOGGER.error("No hay datos coincidentes en cross/struct/derived para %s.", run_date)
+            return 2
+        target_dates = [run_date]
+
+    target_dates = sorted(target_dates)
+    LOGGER.info(
+        "Fusionando %s fechas (intersección cross/struct/derived) con weights=%s y temp=%.2f.",
+        len(target_dates),
+        weights,
+        args.softmax_temp,
     )
+
+    cross = _load_daily_frame(
+        cross_path, target_dates, "cross_daily", "score_cruzado", "detalle_cruzado", cached_df=cross_df
+    )
+    structural = _load_daily_frame(
+        struct_path, target_dates, "struct_daily", "score_estructural", "detalle_estructural", cached_df=struct_df
+    )
+    derived = _load_daily_frame(
+        derived_path, target_dates, "derived_daily", "score_derivado", "detalle_derivado", cached_df=derived_df
+    )
+
+    if cross.empty or structural.empty or derived.empty:
+        LOGGER.error("Alguna capa quedó vacía tras filtrar fechas; no se puede fusionar.")
+        return 2
 
     merged = cross.merge(structural, on=["fecha", "numero"], how="inner")
     merged = merged.merge(derived, on=["fecha", "numero"], how="inner")
+    if merged.empty:
+        LOGGER.error("La unión entre capas quedó vacía; revisar consistencia de fechas.")
+        return 2
 
     merged["score_cruzado"] = merged["score_cruzado"].astype(float)
     merged["score_estructural"] = merged["score_estructural"].astype(float)
@@ -309,12 +371,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         + merged["score_estructural"] * weights[1]
         + merged["score_derivado"] * weights[2]
     )
-    merged["prob"] = _softmax(merged["score_total"], args.softmax_temp)
+    merged["prob"] = merged.groupby("fecha")["score_total"].transform(
+        lambda col: _softmax(col, temperature=args.softmax_temp)
+    )
     merged["tipo_convergencia"] = merged.apply(
         lambda row: _build_tipo_convergencia(row, args.activation_threshold), axis=1
     )
     merged["detalles"] = merged.apply(_combine_details, axis=1)
-    merged["fecha"] = merged["fecha"].dt.strftime("%Y-%m-%d")
 
     ordered = merged[
         [
@@ -329,9 +392,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "detalles",
         ]
     ].sort_values(["fecha", "numero"])
+    ordered["fecha"] = ordered["fecha"].dt.strftime("%Y-%m-%d")
 
-    run_date_str = run_date.strftime("%Y-%m-%d")
-    snapshot_path = DATA_DERIVED / f"jugadas_fusionadas_3capas_{run_date_str}.parquet"
+    if len(target_dates) == 1:
+        run_label = target_dates[0].strftime("%Y-%m-%d")
+        snapshot_path = DATA_DERIVED / f"jugadas_fusionadas_3capas_{run_label}.parquet"
+    else:
+        run_label = f"{target_dates[0].strftime('%Y-%m-%d')}:{target_dates[-1].strftime('%Y-%m-%d')}"
+        snapshot_path = DATA_DERIVED / "jugadas_fusionadas_3capas_batch.parquet"
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
     ordered.to_parquet(snapshot_path, index=False)
     shutil.copy2(snapshot_path, LATEST_OUTPUT)
@@ -339,7 +407,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bucket = args.s3_bucket or BUCKET_DEFAULT
     prefix = args.s3_prefix or PREFIX_DEFAULT
     if bucket:
-        object_name = _build_object_name(prefix, run_date, "jugadas_fusionadas_3capas.parquet")
+        object_name = _build_object_name(prefix, target_dates[-1], "jugadas_fusionadas_3capas.parquet")
         upload_artifact(snapshot_path, bucket, object_name=object_name)
     else:
         LOGGER.info("Bucket S3 no configurado; se omite carga del artefacto de fusión.")
@@ -350,7 +418,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else []
     )
     LOGGER.info(
-        "Fusión completada -> filas=%s, sum(prob)=%s, score_total∈[%.4f, %.4f]",
+        "Fusión completada -> fechas=%s, filas=%s, sum(prob)=%s, score_total∈[%.4f, %.4f]",
+        len(target_dates),
         len(ordered),
         prob_sum,
         float(ordered["score_total"].min()) if not ordered.empty else 0.0,
@@ -362,7 +431,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     maybe_log_mlflow(
         args.mlflow_uri,
         params={
-            "run_date": run_date_str,
+            "run_date": run_label,
             "weights": ",".join(map(str, weights)),
             "activation_threshold": str(args.activation_threshold),
             "softmax_temp": str(args.softmax_temp),

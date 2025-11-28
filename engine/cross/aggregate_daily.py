@@ -210,6 +210,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--lags", default=",".join(map(str, DEFAULT_LAGS)), help="Lags a evaluar (ej. '1,2,3').")
     parser.add_argument("--run-date", default=None, help="Fecha a procesar (YYYY-MM-DD).")
+    parser.add_argument("--all-dates", action="store_true", help="Si se pasa, exporta todas las fechas disponibles.")
     parser.add_argument(
         "--detail-top",
         type=int,
@@ -237,45 +238,67 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not dates:
         LOGGER.error("El dataset de eventos está vacío.")
         return 2
-    run_date = _parse_run_date(args.run_date, dates)
-    target_ts = pd.Timestamp(run_date)
-    if target_ts in dates:
-        idx = dates.index(target_ts)
-        base_ts = target_ts
+    latest_date = max(dates).date()
+    if args.all_dates:
+        run_date = latest_date
+        trimmed_dates = dates
+        trimmed_positions = per_date_positions
         forecast = False
-    else:
-        base_ts = dates[-1]
-        idx = len(dates) - 1
-        forecast = True
-        LOGGER.warning(
-            "No existe información para la fecha %s en eventos_numericos; se reutiliza %s como base para pronosticar.",
-            run_date,
-            base_ts.date(),
+        base_ts = pd.Timestamp(latest_date)
+        LOGGER.info(
+            "Calculando cross_daily para todas las fechas disponibles (%s fechas) con lags=%s ...",
+            len(trimmed_dates),
+            lags,
         )
+    else:
+        run_date = _parse_run_date(args.run_date, dates)
+        target_ts = pd.Timestamp(run_date)
+        if target_ts in dates:
+            idx = dates.index(target_ts)
+            base_ts = target_ts
+            forecast = False
+        else:
+            base_ts = dates[-1]
+            idx = len(dates) - 1
+            forecast = True
+            LOGGER.warning(
+                "No existe información para la fecha %s en eventos_numericos; se reutiliza %s como base para pronosticar.",
+                run_date,
+                base_ts.date(),
+            )
 
-    trimmed_dates = dates[: idx + 1]
-    trimmed_positions = per_date_positions[: idx + 1]
+        trimmed_dates = dates[: idx + 1]
+        trimmed_positions = per_date_positions[: idx + 1]
+        LOGGER.info("Calculando cross_daily para %s con lags=%s ...", run_date, lags)
 
-    LOGGER.info("Calculando cross_daily para %s con lags=%s ...", run_date, lags)
     df = _calculate_cross_scores(trimmed_dates, trimmed_positions, lags, max(args.detail_top, 1))
     df["fecha"] = df["fecha"].dt.strftime("%Y-%m-%d")
 
-    snapshot_path = DATA_DERIVED / f"cross_daily_{run_date}.parquet"
+    snapshot_path = DATA_DERIVED / ("cross_daily_all.parquet" if args.all_dates else f"cross_daily_{run_date}.parquet")
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
-    daily = df[df["fecha"] == base_ts.strftime("%Y-%m-%d")].copy()
-    if forecast:
-        daily["fecha"] = run_date.strftime("%Y-%m-%d")
+    if args.all_dates:
+        daily = df
+    else:
+        daily = df[df["fecha"] == base_ts.strftime("%Y-%m-%d")].copy()
+        if forecast:
+            daily["fecha"] = run_date.strftime("%Y-%m-%d")
     daily.to_parquet(snapshot_path, index=False)
     daily.to_parquet(DERIVED_LATEST, index=False)
 
     if args.s3_bucket:
-        object_name = _build_object_name(args.s3_prefix, run_date, "cross_daily.parquet")
+        object_run_date = latest_date if args.all_dates else run_date
+        object_name = _build_object_name(
+            args.s3_prefix,
+            object_run_date,
+            "cross_daily_all.parquet" if args.all_dates else "cross_daily.parquet",
+        )
         upload_artifact(snapshot_path, args.s3_bucket, object_name=object_name)
     else:
         LOGGER.info("Bucket S3 no configurado; se omite carga.")
 
     LOGGER.info(
-        "Cross diario -> oportunidades=%s activaciones=%s score_promedio=%.4f",
+        "Cross diario%s -> oportunidades=%s activaciones=%s score_promedio=%.4f",
+        " (batch)" if args.all_dates else "",
         int(daily["oportunidades_total"].sum()),
         int(daily["activaciones_total"].sum()),
         float(daily["score_cruzado"].mean()),
@@ -289,6 +312,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "run_date": run_date.isoformat(),
             "lags": ",".join(map(str, lags)),
             "events_path": str(source),
+            "mode": "all_dates" if args.all_dates else "single",
         },
         metrics={
             "oportunidades": float(daily["oportunidades_total"].sum()),

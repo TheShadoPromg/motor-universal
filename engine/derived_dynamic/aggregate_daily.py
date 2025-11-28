@@ -263,6 +263,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=None,
         help="Prefijo dentro del bucket antes de YYYY/MM/DD.",
     )
+    parser.add_argument(
+        "--all-dates",
+        action="store_true",
+        help="Si se pasa, exporta todas las fechas disponibles en derived_daily (batch completo).",
+    )
     return parser.parse_args(argv)
 
 
@@ -278,16 +283,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     aggregated = _aggregate(derived, max(args.detail_top, 1))
-    target_date = _parse_target_date(args.target_date, aggregated["fecha"])
-    mask = aggregated["fecha"] == target_date
-    if mask.any():
-        daily = aggregated.loc[mask].copy()
+    if args.all_dates:
+        daily = aggregated
+        target_date = pd.to_datetime(aggregated["fecha"]).max()
     else:
-        daily = _forecast_from_latest(aggregated, target_date)
+        target_date = _parse_target_date(args.target_date, aggregated["fecha"])
+        mask = aggregated["fecha"] == target_date
+        if mask.any():
+            daily = aggregated.loc[mask].copy()
+        else:
+            daily = _forecast_from_latest(aggregated, target_date)
 
     DATA_DERIVED.mkdir(parents=True, exist_ok=True)
     date_str = target_date.strftime("%Y-%m-%d")
-    snapshot_path = DATA_DERIVED / f"derived_daily_{date_str}.parquet"
+    filename = "derived_daily_all.parquet" if args.all_dates else f"derived_daily_{date_str}.parquet"
+    snapshot_path = DATA_DERIVED / filename
     daily.to_parquet(snapshot_path, index=False)
     LOGGER.info("Snapshot diario guardado en %s (%s filas).", snapshot_path, len(daily))
     daily.to_parquet(DERIVED_DAILY_LATEST, index=False)
@@ -296,7 +306,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bucket = args.s3_bucket or DEFAULT_BUCKET
     prefix = args.s3_prefix or DEFAULT_PREFIX
     if bucket:
-        object_name = _build_object_name(prefix, target_date, "derived_daily.parquet")
+        object_name = _build_object_name(prefix, target_date, filename if args.all_dates else "derived_daily.parquet")
         upload_artifact(snapshot_path, bucket, object_name=object_name)
     else:
         LOGGER.info("Bucket S3 no configurado; se omite la carga del derivado diario.")
